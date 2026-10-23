@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="BetterDarkScreenLogo.png" width="560" alt="BetterDarkScreen" />
+<img src="docs/logo.png" width="560" alt="BetterDarkScreen" />
 
 # BetterDarkScreen
 
