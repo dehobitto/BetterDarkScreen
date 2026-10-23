@@ -19,6 +19,11 @@ public sealed class MonitorSettings
     public int HwNormal { get; set; } = -1;
     /// <summary>True while we hold the hardware brightness lowered (crash recovery).</summary>
     public bool HwDimmed { get; set; }
+    /// <summary>
+    /// Slow hardware mode for monitors that blink or restart on frequent DDC/CI writes:
+    /// no fade, one write after the slider stops, at most one write every 1.5 s.
+    /// </summary>
+    public bool HwSlow { get; set; }
 }
 
 public sealed class Settings

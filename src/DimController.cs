@@ -197,6 +197,7 @@ internal sealed class DimController : IDisposable
         foreach (var sl in _slots)
         {
             var ms = _s.For(sl.Display.Id);
+            _hw.SetSlow(sl.Display.Id, ms.HwSlow);
             double target = active && ms.Enabled ? Math.Clamp(ms.Level, 0, 95) / 100.0 * ScheduleFactor : 0;
             sl.Target = target;
             anyDim |= target > 0;
@@ -276,7 +277,8 @@ internal sealed class DimController : IDisposable
                 return;
 
             case Channel.Hardware:
-                _hw.SetDim(sl.Display.Id, sl.Current);
+                // Slow mode: no fade, jump straight to the final level (HwBrightness debounces the write).
+                _hw.SetDim(sl.Display.Id, _s.For(sl.Display.Id).HwSlow ? sl.Target : sl.Current);
                 return;
 
             default:

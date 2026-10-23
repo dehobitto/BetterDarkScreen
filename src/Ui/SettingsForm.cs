@@ -362,7 +362,9 @@ internal sealed class SettingsForm : Form
                 BeginInvoke(Build);
             };
 
-            int h = D(14 + 42 + 14 + 38 + 16);
+            bool hwChosen = st.Requested == MonitorMethod.Hardware && st.HwSupported != false;
+            int slowH = hwChosen ? D(12 + 52) : 0;
+            int h = D(14 + 42 + 14 + 38 + 16) + slowH;
             var card = NewCard(h, seg, gap: D(8));
             var bg = card.FillColor;
             var glyph = new Label2 { Text = "", Family = Theme.IconFont, Px = 20, BackColor = bg };
@@ -409,6 +411,28 @@ internal sealed class SettingsForm : Form
             seg.BackColor = bg;
             seg.SetBounds(D(16), D(14 + 42 + 14), card.Width - D(32), D(38));
             card.Controls.Add(seg);
+
+            if (hwChosen)
+            {
+                // Slow hardware mode for monitors that blink or restart on frequent DDC/CI writes.
+                int sy = D(14 + 42 + 14 + 38 + 12);
+                var sep = new Panel { BackColor = t.CardBorder };
+                sep.SetBounds(D(16), sy, card.Width - D(32), 1);
+                var tl = new Label2 { Text = "Slow mode", Px = 14, BackColor = bg };
+                tl.SetBounds(D(16), sy + D(8), card.Width - D(130), D(20));
+                var dl = new Label2
+                {
+                    Text = "Screen blinks or restarts? Brightness then jumps in one step, after you stop moving the slider",
+                    Px = 12, Color = t.TextDim, BackColor = bg,
+                    Flags = TextFormatFlags.WordBreak | TextFormatFlags.NoPadding | TextFormatFlags.EndEllipsis,
+                };
+                dl.SetBounds(D(16), sy + D(28), card.Width - D(130), D(32));
+                var tg = Toggle(ms.HwSlow, v => ms.HwSlow = v);
+                tg.AccessibleName = "slow:" + st.Display.Id;
+                tg.BackColor = bg;
+                tg.SetBounds(card.Width - D(16) - D(84), sy + D(16), D(84), D(24));
+                card.Controls.AddRange(new Control[] { sep, tl, dl, tg });
+            }
         }
 
         // Note

@@ -23,7 +23,15 @@ internal sealed class HwBrightness : IDisposable
         public bool Dimmed;                 // we currently hold it lowered
         public double WantDim;              // 0..0.95
         public int LastSet = -1;
+        public bool Slow;                   // debounce + rate limit writes (fragile monitors)
+        public long ChangedAt;              // Environment.TickCount64 of the last WantDim change
+        public long WroteAt = long.MinValue / 2;
     }
+
+    /// <summary>Slow mode: wait this long after the last change before writing (slider has stopped).</summary>
+    private const int SlowSettleMs = 800;
+    /// <summary>Slow mode: never write more often than this.</summary>
+    private const int SlowMinGapMs = 1500;
 
     private readonly object _lock = new();
     private readonly Dictionary<string, Dev> _devs = new(StringComparer.OrdinalIgnoreCase);
@@ -61,6 +69,21 @@ internal sealed class HwBrightness : IDisposable
             if (!_devs.TryGetValue(id, out var d)) return;
             if (Math.Abs(d.WantDim - dim) < 0.0001) return;
             d.WantDim = dim;
+            d.ChangedAt = Environment.TickCount64;
+        }
+        _wake.Set();
+    }
+
+    private readonly Dictionary<string, bool> _slow = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Turn slow (debounced, rate-limited) writes on or off for one display.</summary>
+    public void SetSlow(string id, bool slow)
+    {
+        lock (_lock)
+        {
+            if (_slow.TryGetValue(id, out var cur) && cur == slow) return;
+            _slow[id] = slow;
+            if (_devs.TryGetValue(id, out var d)) d.Slow = slow;
         }
         _wake.Set();
     }
@@ -69,9 +92,10 @@ internal sealed class HwBrightness : IDisposable
 
     private void Run()
     {
+        int wait = Timeout.Infinite;
         while (!_quit)
         {
-            _wake.WaitOne();
+            _wake.WaitOne(wait);
             List<DisplaySpec>? specs;
             lock (_lock) { specs = _pendingSpecs; _pendingSpecs = null; }
             if (specs != null) Reprobe(specs);
@@ -86,6 +110,16 @@ internal sealed class HwBrightness : IDisposable
                 foreach (var d in list)
                     if (Step(d)) { again = true; Thread.Sleep(60); }
             }
+
+            // Slow-mode displays with a pending change: wake up when they are due.
+            wait = Timeout.Infinite;
+            List<Dev> all;
+            lock (_lock) all = _devs.Values.ToList();
+            foreach (var d in all)
+            {
+                int due = SlowDueIn(d);
+                if (due >= 0 && (wait == Timeout.Infinite || due < wait)) wait = Math.Max(due, 20);
+            }
         }
         RestoreAll();
     }
@@ -99,6 +133,7 @@ internal sealed class HwBrightness : IDisposable
         {
             old.TryGetValue(sp.Id, out var prev);
             var d = new Dev { Id = sp.Id, Gdi = sp.GdiName, Internal = sp.Internal };
+            lock (_lock) d.Slow = _slow.TryGetValue(sp.Id, out var slow) && slow;
             if (prev != null) { d.Normal = prev.Normal; d.Dimmed = prev.Dimmed; d.WantDim = prev.WantDim; }
             else if (sp.SavedDimmed && sp.SavedNormal >= 0) { d.Normal = sp.SavedNormal; d.Dimmed = true; } // crash recovery
 
@@ -168,12 +203,29 @@ internal sealed class HwBrightness : IDisposable
         return IntPtr.Zero;
     }
 
+    /// <summary>Slow mode: ms until a pending write may happen (0 = now), or -1 if nothing is pending.</summary>
+    private int SlowDueIn(Dev d)
+    {
+        double dim; long changed;
+        lock (_lock) { if (!d.Slow) return -1; dim = d.WantDim; changed = d.ChangedAt; }
+        if (d.Supported != true) return -1;
+        bool pending = dim <= 0.0005 ? d.Dimmed : !d.Dimmed || TargetFor(d, dim) != d.LastSet;
+        if (!pending) return -1;
+        long now = Environment.TickCount64;
+        long due = Math.Max(changed + SlowSettleMs, d.WroteAt + SlowMinGapMs);
+        return (int)Math.Max(0, due - now);
+    }
+
+    private static int TargetFor(Dev d, double dim) => Math.Clamp((int)Math.Round(d.Normal * (1 - dim)), 0, (int)d.Max);
+
     /// <summary>Moves one device toward its wanted level. Returns true if it wrote something.</summary>
     private bool Step(Dev d)
     {
         if (d.Supported != true) return false;
         double dim;
-        lock (_lock) dim = d.WantDim;
+        bool slow;
+        lock (_lock) { dim = d.WantDim; slow = d.Slow; }
+        if (slow && SlowDueIn(d) != 0) return false; // wait until the slider settles / rate limit
 
         if (dim <= 0.0005)
         {
@@ -193,8 +245,7 @@ internal sealed class HwBrightness : IDisposable
             d.Dimmed = true;
             Report(d);
         }
-        int target = (int)Math.Round(d.Normal * (1 - dim));
-        target = Math.Clamp(target, 0, (int)d.Max);
+        int target = TargetFor(d, dim);
         if (target == d.LastSet) return false;
         return Write(d, target);
     }
@@ -250,6 +301,7 @@ internal sealed class HwBrightness : IDisposable
             if (!ok) { Thread.Sleep(50); ok = Native.SetVCPFeature(d.Phys, Native.VCP_BRIGHTNESS, (uint)value); }
         }
         if (ok) d.LastSet = value;
+        d.WroteAt = Environment.TickCount64;
         return ok;
     }
 
