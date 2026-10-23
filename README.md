@@ -4,9 +4,7 @@
 
 # BetterDarkScreen
 
-**Dim your screens below their lowest brightness. Per monitor, on a schedule, also in games.**
-
-A tiny Windows tray app written in C#. Minimal Win11 look, near-zero CPU, no telemetry.
+**Dim every monitor from the tray. No more reaching for the buttons.**
 
 [![GitHub stars](https://img.shields.io/github/stars/dehobitto/BetterDarkScreen?style=flat&logo=github)](https://github.com/dehobitto/BetterDarkScreen/stargazers)
 [![Downloads](https://img.shields.io/github/downloads/dehobitto/BetterDarkScreen/total?logo=github&label=downloads)](https://github.com/dehobitto/BetterDarkScreen/releases)
@@ -21,181 +19,92 @@ A tiny Windows tray app written in C#. Minimal Win11 look, near-zero CPU, no tel
 
 ---
 
-> ### 📺 Are your eyes burning at 2 AM?
->
-> Is your monitor *still* too bright at **zero percent**? Have you been forced to reach behind the bezel, fumbling in the dark for four identical little buttons, pressing MENU, then DOWN, then DOWN, then *the wrong one*, like some kind of animal?
->
-> **Friend, that is not your fault.** Nobody told you that "0 %" was a suggestion. You've been wronged. Your retinas have been wronged. And I am here to make it right.
->
-> Introducing **BetterDarkScreen**! One little moon in your tray. Every monitor, dimmed **below** the factory floor. On a schedule. With the sunset. *Even in games.* No hooks, no injections, no funny business with your anti-cheat. 🌙
->
-> And the price? **Zero dollars.** Zero cents. Open source, MIT licensed, no telemetry, no catch. I don't even want your email.
->
-> So stop squinting. Stop suffering. Stop crawling behind your monitor at midnight.
->
-> **Don't touch those buttons. Click the moon. 🌙 BetterDarkScreen!**
+> Did you know that your eyes have rights? Your doctor says they do. And so do I. I believe that until proven guilty, every man, woman, dev and child on this planet is innocent, even the lazy ones. And that’s why I dim for you, devs!
 
 ---
 
 ## Why
 
-Monitors at 0 % brightness are often still too bright at night. Dark mode helps apps, but not videos, games or the desktop.
-BetterDarkScreen puts one dimming control per monitor in your tray. It picks the best way to dim each screen, and it can turn itself on and off by the clock or with the sun.
+Changing monitor brightness means reaching for awkward buttons, so most of us just don't, and the screen hits your eyes at night.
+BetterDarkScreen puts a slider for each monitor in the tray and can turn dimming on and off by itself.
+
+Existing tools didn't work with some popular monitors and were hard to tune, so this one lets you pick how each screen is dimmed.
 
 ## Features
 
-- 🌙 **Per-monitor dimming**: 0–95 %, separate on/off switches, optionally linked sliders
-- 🧠 **Four ways to dim**, chosen globally or **per monitor**:
+- **Per monitor**: its own level (0–95 %), on/off and method, or link all sliders
+- **Four methods**, per monitor or for all:
 
-  | Method | How it works | Best for | Limits |
-  |---|---|---|---|
-  | **Overlay** | Click-through black layer composited by DWM | Desktop, video, windowed and borderless games | Can't cover exclusive fullscreen, Start menu, UAC, cursor |
-  | **Gamma** | Scales the GPU gamma ramp (keeps your color calibration) | Exclusive-fullscreen games | Windows stops near 50 % (one-click unlock), no effect in HDR |
-  | **Hardware** | Monitor's own backlight via DDC/CI (laptops: Windows brightness API) | Best image quality, no color loss | Monitor must support DDC/CI; slower response |
-  | **Auto** *(default)* | Overlay normally, gamma for the game's monitor in exclusive fullscreen | Set it and forget it | — |
+  | Method | How | Good for |
+  |---|---|---|
+  | **Hardware** | Monitor's own brightness (DDC/CI, laptops: Windows API) | Best picture |
+  | **Overlay** | Dark click-through layer | Desktop, video, windowed games, below 0 % |
+  | **Gamma** | Graphics card gamma | Exclusive-fullscreen games |
+  | **Auto** *(default)* | Overlay, Gamma when a game is fullscreen | Set and forget |
 
-  Choose **Custom** to give every monitor its own method. Unsupported methods are detected and marked, and the app falls back to overlay.
-- 🕘 **Schedule**: always on, custom hours (e.g. 22:00 to 07:00), or sunset to sunrise. Sun times are calculated offline from latitude and longitude, with offsets.
-- 🌅 **Smooth fades** at the start and end of the schedule (0–90 min), plus soft transitions when you move a slider
-- ⏸️ **Pause** for 15 min / 1 h / 3 h / until you resume
-- 🎮 **Game friendly**: no injection, no hooks into games, so it's safe with anti-cheat. Detects exclusive-fullscreen D3D apps.
-- 🎥 **Hidden from capture**: screenshots, OBS and Discord streams stay bright (overlay mode)
-- ⌨️ **Configurable global hotkeys**, with conflicts shown
-- 🎨 **Native look**: follows light/dark mode and your accent color, Fluent icons, rounded corners
-- 🪶 **Lightweight**: idle timer ticks every 15–30 s. Windows are created only when needed. Memory is trimmed after you close the UI.
-- 🔒 **Private**: no network access, no telemetry, settings in one JSON file
+- **Schedule**: always, custom hours or sunset to sunrise (offline), with smooth fades
+- **Pause** for 15 min / 1 h / 3 h / until resumed
+- **Hotkeys**, configurable
+- **Game safe**: no injection, no hooks. Screenshots and streams stay bright (Overlay)
+- **Light**: ~0 % CPU when idle, no network, settings in one JSON file
 
 ## Install
 
-### Download
-
-Get `BetterDarkScreen.exe` from the [Releases](../../releases) page. It is a single self-contained file, so you don't need to install .NET.
-Run it and a moon appears in your tray. Turn on **Settings → General → Start with Windows** if you want it at login.
-
-### Build from source
-
-You need the [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0) (**SDK 8.0.x → Windows x64 installer**).
-
-```powershell
-git clone <this repo>
-cd BetterDarkScreen
-.\build.ps1              # -> publish\BetterDarkScreen-<version>.exe  (self-contained, single file)
-.\build.ps1 -Small       # compressed exe: ~3x smaller file, slightly more RAM
-dotnet run --project src # debug run
-```
+Download `BetterDarkScreen.exe` from [Releases](../../releases) and run it. It's a single file, no .NET install needed.
+The monitor icon appears in the tray. Turn on **Settings → General → Start with Windows** to run it at login.
 
 ## Usage
 
-| Where | What |
-|---|---|
-| **Left-click** the tray moon | Quick panel: per-monitor sliders and switches, method, pause, status |
-| **Right-click** the tray moon | Menu: open panel, on/off, pause, settings, exit |
-| `BetterDarkScreen.exe --settings` | Open settings directly |
-| Run the exe again while it's running | Opens the quick panel |
-
-### Default hotkeys
-
-All of these can be changed (or cleared) in **Settings → Hotkeys**.
-
-| Action | Default |
-|---|---|
-| Dim more | `Ctrl` + `Alt` + `PgDn` |
-| Dim less | `Ctrl` + `Alt` + `PgUp` |
-| Turn dimming on / off | `Ctrl` + `Alt` + `End` |
-| Pause 1 hour / resume | *not set* |
-| Open quick panel | *not set* |
-
-The step size (1–20 %) is adjustable.
-
-### Settings window
-
-| Page | Contents |
-|---|---|
-| **Schedule** | Always / custom hours / sunset to sunrise, location, offsets, fade length |
-| **Dimming** | Global method, linked sliders, hide from capture, gamma unlock |
-| **Displays** | Per-monitor method and detected support (✓ / ✗ for hardware and gamma) |
-| **Hotkeys** | Record shortcuts, step size |
-| **General** | Start with Windows, settings file location |
-
-Settings live in `%AppData%\BetterDarkScreen\settings.json`.
+- **Left-click** the tray icon: quick panel with sliders, method and pause
+- **Right-click**: menu with settings and exit
+- Default hotkeys: `Ctrl+Alt+PgDn` dim more, `Ctrl+Alt+PgUp` dim less, `Ctrl+Alt+End` on/off. Change them in **Settings → Hotkeys**.
 
 ## Troubleshooting
 
 <details>
-<summary><b>Gamma won't go darker than about 50 %</b></summary>
+<summary><b>Hardware is missing or doesn't change anything</b></summary>
 
-Windows refuses gamma ramps that deviate too much from normal. Open **Settings → Dimming → Deeper gamma dimming → Unlock**. This sets `HKLM\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ICM\GdiIcmGammaRange = 256` (admin prompt). Sign out or reboot for it to take effect. The quick panel shows a warning when you hit the limit.
+Turn on **DDC/CI** in the monitor's on-screen menu and reconnect the cable. Some docks, KVMs and adapters block DDC/CI.
+If brightness only goes down, the monitor's picture mode may lock it (for example Samsung: Eye Saver, Eco or some picture modes). Switch to a **Custom** / standard mode.
 </details>
 
 <details>
-<summary><b>My monitor shows "Hardware ✗" / "no DDC/CI"</b></summary>
+<summary><b>Screen blinks or restarts on Hardware</b></summary>
 
-Turn on **DDC/CI** in the monitor's on-screen menu (often under *System* or *Other*), then replug the cable or restart the app. Some monitors, docks, KVMs and HDMI adapters don't pass DDC/CI at all. Overlay or gamma still work there.
+Some monitors can't handle frequent brightness commands. Turn on **Settings → Displays → Slow mode** for that monitor: brightness then changes in one step, after you stop moving the slider.
+</details>
+
+<details>
+<summary><b>Gamma stops at about 50 %</b></summary>
+
+Windows limits gamma. Use **Settings → Dimming → Deeper gamma dimming → Unlock** (admin), then sign out. Gamma doesn't work in HDR.
 </details>
 
 <details>
 <summary><b>The overlay doesn't show in a game</b></summary>
 
-The game runs in exclusive fullscreen. Use **Auto** (switches that monitor to gamma automatically) or **Gamma**, or set the game to borderless windowed.
-</details>
-
-<details>
-<summary><b>Gamma does nothing</b></summary>
-
-Gamma ramps are ignored in **HDR** mode and by some drivers. Use overlay or hardware for that monitor (Settings → Displays).
-</details>
-
-<details>
-<summary><b>Input lag in borderless games?</b></summary>
-
-A topmost overlay can stop DirectFlip/MPO, which may add about one frame of latency. If that matters, use Gamma or Hardware for that monitor.
+The game is in exclusive fullscreen. Use **Auto** or **Gamma**, or switch the game to borderless.
 </details>
 
 <details>
 <summary><b>The app crashed. Is my screen stuck dark?</b></summary>
 
-No. Gamma is reset on any crash. Hardware brightness is remembered in the settings file and restored the next time the app starts.
+No. Gamma resets on any crash, and hardware brightness is restored on the next start.
 </details>
 
-## How it works
+## Build from source
 
-```
-TrayApp ── NotifyIcon, hotkeys, popup menu, panel and settings windows
-   │
-DimController ── schedule × level × pause → target per monitor, smooth animation,
-   │             fullscreen detection (SHQueryUserNotificationState + WinEvent hook)
-   ├── OverlayWindow  WS_EX_LAYERED | TRANSPARENT | TOPMOST | NOACTIVATE, one alpha value,
-   │                  WDA_EXCLUDEFROMCAPTURE
-   ├── GammaRamp      SetDeviceGammaRamp per display, scales the original (calibrated) ramp,
-   │                  finds the OS limit by binary search, re-applied every 3 s while active
-   └── HwBrightness   DDC/CI VCP 0x10 (dxva2) and \\.\LCD IOCTLs on a background thread,
-                      coalesced writes, crash-safe restore
-```
+Needs the [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0).
 
-### Project layout
-
+```powershell
+.\build.ps1          # -> publish\BetterDarkScreen-<version>.exe
+.\build.ps1 -Small   # compressed, ~3x smaller file
+dotnet run --project src
 ```
-src/
-  Program.cs          single instance, crash safety
-  TrayApp.cs          tray icon, menu, hotkeys, startup
-  DimController.cs    core engine
-  OverlayWindow.cs    overlay method
-  GammaRamp.cs        gamma method
-  HwBrightness.cs     hardware method
-  Displays.cs         monitor enumeration + friendly names
-  Schedule.cs         schedule + offline sunrise/sunset (NOAA)
-  Settings.cs         JSON settings (source-generated)
-  Hotkey.cs           hotkey parse / format
-  Native.cs           P/Invoke
-  Ui/                 theme, owner-drawn controls, panel, popup menu, settings
-```
-
-The UI is drawn by hand on WinForms (no WPF, no third-party packages), so the app starts fast and stays small.
 
 ## Contributing
 
-Issues and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md).
-Useful things to report: monitor model and whether DDC/CI worked, GPU and driver, Windows build, HDR on or off.
+Issues and PRs are welcome, see [CONTRIBUTING.md](CONTRIBUTING.md). Monitor model, GPU and whether DDC/CI worked help a lot in bug reports.
 
 ## License
 
