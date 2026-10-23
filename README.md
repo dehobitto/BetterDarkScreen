@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="docs/icon.png" width="96" alt="BetterDarkScreen icon" />
+<img src="BetterDarkScreenLogo.png" width="560" alt="BetterDarkScreen" />
 
 # BetterDarkScreen
 
@@ -8,11 +8,32 @@
 
 A tiny Windows tray app written in C#. Minimal Win11 look, near-zero CPU, no telemetry.
 
+[![GitHub stars](https://img.shields.io/github/stars/dehobitto/BetterDarkScreen?style=flat&logo=github)](https://github.com/dehobitto/BetterDarkScreen/stargazers)
+[![Downloads](https://img.shields.io/github/downloads/dehobitto/BetterDarkScreen/total?logo=github&label=downloads)](https://github.com/dehobitto/BetterDarkScreen/releases)
+[![Latest release](https://img.shields.io/github/v/release/dehobitto/BetterDarkScreen?logo=github)](https://github.com/dehobitto/BetterDarkScreen/releases/latest)
+[![Build](https://img.shields.io/github/actions/workflow/status/dehobitto/BetterDarkScreen/build.yml?logo=githubactions&logoColor=white)](https://github.com/dehobitto/BetterDarkScreen/actions)
+
 ![Windows 10/11](https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4?logo=windows)
 ![.NET 8](https://img.shields.io/badge/.NET-8-512BD4?logo=dotnet)
 ![License: MIT](https://img.shields.io/badge/License-MIT-green)
 
 </div>
+
+---
+
+> ### 📺 Are your eyes burning at 2 AM?
+>
+> Is your monitor *still* too bright at **zero percent**? Have you been forced to reach behind the bezel, fumbling in the dark for four identical little buttons, pressing MENU, then DOWN, then DOWN, then *the wrong one*, like some kind of animal?
+>
+> **Friend, that is not your fault.** Nobody told you that "0 %" was a suggestion. You've been wronged. Your retinas have been wronged. And I am here to make it right.
+>
+> Introducing **BetterDarkScreen**! One little moon in your tray. Every monitor, dimmed **below** the factory floor. On a schedule. With the sunset. *Even in games.* No hooks, no injections, no funny business with your anti-cheat. 🌙
+>
+> And the price? **Zero dollars.** Zero cents. Open source, MIT licensed, no telemetry, no catch. I don't even want your email.
+>
+> So stop squinting. Stop suffering. Stop crawling behind your monitor at midnight.
+>
+> **Don't touch those buttons. Click the moon. 🌙 BetterDarkScreen!**
 
 ---
 
