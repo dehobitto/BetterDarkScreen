@@ -1,7 +1,10 @@
 name: build
 
 # lint -> build -> release
-#   * every push / PR: dotnet format check + Release build (warnings are errors), exe uploaded as artifact
+#   * every push / PR: dotnet format check + Release build (warnings are errors), exes uploaded as artifact
+#     - BetterDarkScreen-<ver>-win-x64.exe        self-contained, fastest start
+#     - BetterDarkScreen-<ver>-win-x64-small.exe  self-contained, compressed (~3x smaller, a bit more RAM)
+#     Neither needs .NET installed.
 #   * push to main: if <Version> in src/BetterDarkScreen.csproj has no tag yet, tag v<Version> and publish a GitHub release
 #   * pushing a tag v* yourself also publishes a release for that tag
 
@@ -23,6 +26,7 @@ env:
   DOTNET_NOLOGO: true
   DOTNET_CLI_TELEMETRY_OPTOUT: true
   PROJECT: src/BetterDarkScreen.csproj
+  RID: win-x64
 
 jobs:
   lint:
@@ -62,22 +66,31 @@ jobs:
           "version=$v" >> $env:GITHUB_OUTPUT
           Write-Host "Version $v"
 
-      - name: Publish
-        run: dotnet publish ${{ env.PROJECT }} -c Release -o publish -p:TreatWarningsAsErrors=true
+      - name: Publish (regular)
+        run: dotnet publish ${{ env.PROJECT }} -c Release -r ${{ env.RID }} -o out/full -p:TreatWarningsAsErrors=true
 
-      - name: Checksum
+      - name: Publish (small, compressed)
+        run: dotnet publish ${{ env.PROJECT }} -c Release -r ${{ env.RID }} -o out/small -p:TreatWarningsAsErrors=true -p:EnableCompressionInSingleFile=true
+
+      - name: Name files and checksums
         shell: pwsh
+        env:
+          VERSION: ${{ steps.ver.outputs.version }}
         run: |
-          $h = (Get-FileHash publish/BetterDarkScreen.exe -Algorithm SHA256).Hash.ToLower()
-          "$h  BetterDarkScreen.exe" | Set-Content -NoNewline -Encoding ascii publish/BetterDarkScreen.exe.sha256
-          Get-Item publish/BetterDarkScreen.exe | Select-Object Name, @{n='MB';e={[math]::Round($_.Length/1MB,1)}}
+          New-Item -ItemType Directory dist | Out-Null
+          $base = "BetterDarkScreen-$env:VERSION-$env:RID"
+          Copy-Item out/full/BetterDarkScreen.exe  "dist/$base.exe"
+          Copy-Item out/small/BetterDarkScreen.exe "dist/$base-small.exe"
+          $lines = Get-ChildItem dist/*.exe | Sort-Object Name | ForEach-Object {
+            "$((Get-FileHash $_ -Algorithm SHA256).Hash.ToLower())  $($_.Name)"
+          }
+          $lines | Set-Content -Encoding ascii dist/SHA256SUMS.txt
+          Get-ChildItem dist | Select-Object Name, @{n='MB';e={[math]::Round($_.Length/1MB,1)}}
 
       - uses: actions/upload-artifact@v4
         with:
           name: BetterDarkScreen-${{ steps.ver.outputs.version }}
-          path: |
-            publish/BetterDarkScreen.exe
-            publish/BetterDarkScreen.exe.sha256
+          path: dist/*
           if-no-files-found: error
 
   release:
@@ -109,8 +122,20 @@ jobs:
       - name: Create release v${{ env.VERSION }}
         if: steps.check.outputs.skip == 'false'
         run: |
-          gh release create "v$VERSION" dist/BetterDarkScreen.exe dist/BetterDarkScreen.exe.sha256 \
+          cat > notes.md <<EOF
+          ## Download
+
+          | File | |
+          |---|---|
+          | \`BetterDarkScreen-$VERSION-$RID.exe\` | Regular build, fastest start |
+          | \`BetterDarkScreen-$VERSION-$RID-small.exe\` | Compressed, ~3x smaller, uses a bit more RAM |
+
+          Both are single files for 64-bit Windows 10/11 and **don't need .NET installed**. Checksums: \`SHA256SUMS.txt\`.
+
+          EOF
+          gh release create "v$VERSION" dist/* \
             --repo "$GITHUB_REPOSITORY" \
             --target "$GITHUB_SHA" \
             --title "BetterDarkScreen $VERSION" \
+            --notes-file notes.md \
             --generate-notes

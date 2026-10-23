@@ -50,7 +50,11 @@ Existing tools didn't work with some popular monitors and were hard to tune, so 
 
 ## Install
 
-Download `BetterDarkScreen.exe` from [Releases](../../releases) and run it. It's a single file, no .NET install needed.
+Download from [Releases](../../releases) and run it. Single file, no .NET install needed:
+
+- `BetterDarkScreen-<version>-win-x64.exe`: regular, fastest start
+- `BetterDarkScreen-<version>-win-x64-small.exe`: ~3x smaller file, uses a bit more RAM
+
 The monitor icon appears in the tray. Turn on **Settings → General → Start with Windows** to run it at login.
 
 ## Usage
@@ -97,8 +101,8 @@ No. Gamma resets on any crash, and hardware brightness is restored on the next s
 Needs the [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0).
 
 ```powershell
-.\build.ps1          # -> publish\BetterDarkScreen-<version>.exe
-.\build.ps1 -Small   # compressed, ~3x smaller file
+.\build.ps1          # -> publish\BetterDarkScreen-<version>-win-x64.exe
+.\build.ps1 -Small   # -> publish\BetterDarkScreen-<version>-win-x64-small.exe
 dotnet run --project src
 ```
 
