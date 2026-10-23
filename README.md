@@ -19,6 +19,10 @@
 
 ---
 
+<p align="center">
+  <img src="https://media.giphy.com/media/5j62OhVdJYcAfYGsKI/giphy.gif" width="360" alt="Saul" />
+</p>
+
 > Did you know that your eyes have rights? Your doctor says they do. And so do I. I believe that until proven guilty, every man, woman, dev and child on this planet is innocent, even the lazy ones. And that’s why I dim for you, devs!
 
 ---
