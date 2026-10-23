@@ -1,4 +1,3 @@
-using System.Drawing;
 using System.Globalization;
 
 namespace BetterDarkScreen.Ui;
@@ -22,13 +21,16 @@ internal sealed class SettingsForm : Form
     private Label2? _preview;
     private string _displaySig = "";
     private int _y;
+    private List<Card>? _group;
+    private Icon? _icon;
 
     private float S => DeviceDpi / 96f;
     private int D(float dip) => (int)Math.Round(dip * S);
-    private int NavW => D(232);
-    private int ContentW => D(600);
-    private int CPad => D(28);
-    private int RowW => ContentW - CPad * 2;
+    private int NavW => D(252);
+    private int ClientW => D(880);
+    private int CX => D(20);                     // content left padding (inside content panel)
+    private int ContentW => ClientW - NavW;
+    private int RowW => ContentW - CX - D(36);   // 36 right padding
 
     public SettingsForm(Settings s, DimController dim, Action changed, Action<bool> setStartup,
                         Func<HotkeyAction, bool> hotkeyOk, Action<bool> suspendHotkeys, Action hotkeysChanged)
@@ -41,7 +43,6 @@ internal sealed class SettingsForm : Form
         StartPosition = FormStartPosition.CenterScreen;
         AutoScaleMode = AutoScaleMode.None;
         KeyPreview = true;
-        try { Icon = Icon.ExtractAssociatedIcon(Environment.ProcessPath!); } catch { }
         _dim.StateChanged += OnDimState;
     }
 
@@ -85,6 +86,7 @@ internal sealed class SettingsForm : Form
     protected override void OnFormClosed(FormClosedEventArgs e)
     {
         _dim.StateChanged -= OnDimState;
+        _icon?.Dispose();
         _suspendHotkeys(false);
         base.OnFormClosed(e);
     }
@@ -100,7 +102,34 @@ internal sealed class SettingsForm : Form
 
     // ------------------------------------------------------------ shell
 
+    protected override CreateParams CreateParams
+    {
+        get
+        {
+            var cp = base.CreateParams;
+            cp.ExStyle |= Native.WS_EX_COMPOSITED; // paint all children in one buffered pass: no flashing
+            return cp;
+        }
+    }
+
     private void Build()
+    {
+        // Freeze painting so the old page doesn't vanish before the new one is ready.
+        bool freeze = IsHandleCreated && Visible;
+        if (freeze) Native.SendMessage(Handle, Native.WM_SETREDRAW, IntPtr.Zero, IntPtr.Zero);
+        try { BuildCore(); }
+        finally
+        {
+            if (freeze)
+            {
+                Native.SendMessage(Handle, Native.WM_SETREDRAW, new IntPtr(1), IntPtr.Zero);
+                Native.RedrawWindow(Handle, IntPtr.Zero, IntPtr.Zero,
+                    Native.RDW_ERASE | Native.RDW_FRAME | Native.RDW_INVALIDATE | Native.RDW_ALLCHILDREN | Native.RDW_UPDATENOW);
+            }
+        }
+    }
+
+    private void BuildCore()
     {
         SuspendLayout();
         var focusName = ActiveControl?.AccessibleName;
@@ -110,35 +139,40 @@ internal sealed class SettingsForm : Form
         var t = Theme.Current;
         BackColor = t.Bg;
 
-        // Navigation
+        // Title bar icon: monochrome monitor mark.
+        var oldIcon = _icon;
+        _icon = Brand.MarkIcon(SystemInformation.SmallIconSize.Width, t.Text);
+        Icon = _icon;
+        oldIcon?.Dispose();
+
+        // Navigation: lockup, then pages.
         var nav = new Panel { BackColor = t.Bg };
-        var appIcon = new Label2 { Text = "\uE708", Family = Theme.IconFont, Px = 16, Color = t.Accent, BackColor = t.Bg };
-        appIcon.SetBounds(D(20), D(18), D(22), D(28));
-        var appName = new Label2 { Text = "BetterDarkScreen", Px = 13, BackColor = t.Bg };
-        appName.SetBounds(D(48), D(18), NavW - D(56), D(28));
-        nav.Controls.AddRange(new Control[] { appIcon, appName });
-        int ny = D(64);
+        var logo = new BrandView { Art = BrandView.Kind.Lockup, Shadow = 3, BackColor = t.Bg, AccessibleName = "BetterDarkScreen" };
+        logo.SetBounds(D(24), D(12), D(153), D(88));
+        nav.Controls.Add(logo);
+        int ny = D(12 + 85 + 20);
         foreach (var (pg, glyph, title) in new[]
                  {
-                     (Page.Schedule, "\uE823", "Schedule"),
-                     (Page.Dimming, "\uE706", "Dimming"),
-                     (Page.Displays, "\uE7F4", "Displays"),
-                     (Page.Hotkeys, "\uE765", "Hotkeys"),
-                     (Page.General, "\uE713", "General"),
+                     (Page.Schedule, "", "Schedule"),
+                     (Page.Dimming, "", "Dimming"),
+                     (Page.Displays, "", "Displays"),
+                     (Page.Hotkeys, "", "Hotkeys"),
+                     (Page.General, "", "General"),
                  })
         {
             var item = new NavItem { Text = title, Glyph = glyph, Selected = pg == _page, BackColor = t.Bg, AccessibleName = "nav:" + title };
-            item.SetBounds(D(8), ny, NavW - D(16), D(40));
+            item.SetBounds(D(8), ny, NavW - D(16), D(36));
             var target = pg;
             item.Click += (_, _) => { if (_page != target) { _page = target; Build(); } };
             nav.Controls.Add(item);
-            ny += D(42);
+            ny += D(38);
         }
 
         // Content
         _content = new Panel { BackColor = t.Bg };
         _preview = null;
-        _y = D(24);
+        _group = null;
+        _y = D(12);
         switch (_page)
         {
             case Page.Schedule: BuildSchedule(); break;
@@ -147,12 +181,13 @@ internal sealed class SettingsForm : Form
             case Page.Hotkeys: BuildHotkeys(); break;
             default: BuildGeneral(); break;
         }
-        int h = Math.Max(D(600), Math.Max(_y + D(24), ny + D(24)));
+        EndGroup();
+        int h = Math.Max(D(688), Math.Max(_y + D(24), ny + D(12)));
         nav.SetBounds(0, 0, NavW, h);
         _content.SetBounds(NavW, 0, ContentW, h);
         Controls.Add(nav);
         Controls.Add(_content);
-        ClientSize = new Size(NavW + ContentW, h);
+        ClientSize = new Size(ClientW, h);
         ResumeLayout();
 
         if (focusName != null)
@@ -177,43 +212,50 @@ internal sealed class SettingsForm : Form
         var sch = new Segmented { Items = new[] { "Always", "Custom hours", "Sunset to sunrise" }, AccessibleName = "Schedule" };
         sch.SetSilently((int)_s.Schedule);
         sch.SelectedChanged += (_, _) => { _s.Schedule = (ScheduleKind)sch.Selected; Apply(); BeginInvoke(Build); };
-        Row("When to dim", null, sch, D(340), D(34));
+        BlockRow("When to dim", "Dimming turns on and off by itself", sch);
 
         if (_s.Schedule == ScheduleKind.Fixed)
         {
+            Header("Hours");
+            BeginGroup();
             var from = Field(_s.FixedStart, "");
             var to = Field(_s.FixedEnd, "");
             from.Box.TextChanged += (_, _) => { if (Schedule.TryParseTime(from.Text, out _)) { _s.FixedStart = from.Text.Trim(); Apply(); UpdatePreview(); } };
             to.Box.TextChanged += (_, _) => { if (Schedule.TryParseTime(to.Text, out _)) { _s.FixedEnd = to.Text.Trim(); Apply(); UpdatePreview(); } };
             Row("Start", "24-hour time, e.g. 21:30", from, D(96), D(32));
             Row("End", "Can be after midnight", to, D(96), D(32));
+            EndGroup();
         }
         else if (_s.Schedule == ScheduleKind.Sun)
         {
+            Header("Location");
+            BeginGroup();
             var lat = Field(_s.Latitude.ToString("0.####", CultureInfo.InvariantCulture), "°");
             var lon = Field(_s.Longitude.ToString("0.####", CultureInfo.InvariantCulture), "°");
             lat.Box.TextChanged += (_, _) => { if (TryNum(lat.Text, -90, 90, out var v)) { _s.Latitude = v; Apply(); UpdatePreview(); } };
             lon.Box.TextChanged += (_, _) => { if (TryNum(lon.Text, -180, 180, out var v)) { _s.Longitude = v; Apply(); UpdatePreview(); } };
             Row("Latitude", "North is positive. Kyiv ≈ 50.45", lat, D(110), D(32));
             Row("Longitude", "East is positive. Kyiv ≈ 30.52", lon, D(110), D(32));
+            EndGroup();
 
+            Header("Offsets");
+            BeginGroup();
             var so = Field(_s.SunsetOffsetMin.ToString(CultureInfo.InvariantCulture), "min");
             var ro = Field(_s.SunriseOffsetMin.ToString(CultureInfo.InvariantCulture), "min");
             so.Box.TextChanged += (_, _) => { if (int.TryParse(so.Text, out var v) && Math.Abs(v) <= 300) { _s.SunsetOffsetMin = v; Apply(); UpdatePreview(); } };
             ro.Box.TextChanged += (_, _) => { if (int.TryParse(ro.Text, out var v) && Math.Abs(v) <= 300) { _s.SunriseOffsetMin = v; Apply(); UpdatePreview(); } };
             Row("Sunset offset", "Minutes. Negative starts earlier", so, D(110), D(32));
             Row("Sunrise offset", "Minutes. Negative stops earlier", ro, D(110), D(32));
+            EndGroup();
         }
 
         if (_s.Schedule != ScheduleKind.Always)
         {
+            Header("Transition");
             Row("Fade", "Smooth transition at start and end", SliderWithValue(0, 90, _s.FadeMinutes, v => $"{v} min",
-                v => { _s.FadeMinutes = v; _dim.Refresh(); }), D(270), D(32));
+                v => { _s.FadeMinutes = v; _dim.Refresh(); }, D(64)), D(180 + 16 + 64), D(32));
 
-            _preview = new Label2 { Px = 12, Color = Theme.Current.TextDim, BackColor = Theme.Current.Bg };
-            _preview.SetBounds(CPad + D(4), _y + D(4), RowW, D(20));
-            _content.Controls.Add(_preview);
-            _y += D(30);
+            _preview = Caption("");
             UpdatePreview();
         }
     }
@@ -221,52 +263,88 @@ internal sealed class SettingsForm : Form
     private void BuildDimming()
     {
         PageTitle("Dimming");
-        var mode = new Segmented { Items = new[] { "Auto", "Overlay", "Gamma", "Hardware", "Custom" }, AccessibleName = "Method" };
+        var t = Theme.Current;
+        BeginGroup();
+        var mode = new Segmented { Items = new[] { "Auto", "Overlay", "Gamma", "Hardware", "Per monitor" }, AccessibleName = "Method" };
         mode.SetSilently((int)_s.Mode);
         mode.SelectedChanged += (_, _) => { _s.Mode = (DimMode)mode.Selected; Apply(); BeginInvoke(Build); };
-        string help = _s.Mode switch
-        {
-            DimMode.Auto => "Overlay normally. Gamma in exclusive-fullscreen games.",
-            DimMode.Overlay => "Click-through dark layer. Smooth, deep, works on every monitor.",
-            DimMode.Gamma => "Graphics card gamma. Works in fullscreen games, depth limited by Windows.",
-            DimMode.Hardware => "Monitor's own backlight via DDC/CI. Best image, needs monitor support.",
-            _ => "Each monitor uses its own method. Set them on the Displays page.",
-        };
-        BlockRow("Method", help, mode, D(36));
+        BlockRow("Method", "How the screens get darker", mode);
 
         if (_s.Mode == DimMode.Custom)
         {
-            var go = new FlatButton { Text = "Open Displays", Glyph = "\uE7F4" };
-            go.Click += (_, _) => { _page = Page.Displays; Build(); };
-            Row("Per-monitor methods", string.Join("  ·  ", _dim.States.Select(st => $"{st.Display.Label}: {FlyoutForm.TagText(st)}")), go, D(150), D(32));
+            foreach (var st in _dim.States)
+            {
+                var ms = _s.For(st.Display.Id);
+                var dd = new DropDown { Items = new[] { "Auto", "Overlay", "Gamma", "Hardware" }, AccessibleName = "method:" + st.Display.Id };
+                dd.SetSilently((int)ms.Method);
+                if (!st.GammaSupported) dd.SetDisabled(2, true);
+                if (st.HwSupported == false) dd.SetDisabled(3, true);
+                string id = st.Display.Id;
+                dd.SelectedChanged += (_, _) => { _s.For(id).Method = (MonitorMethod)dd.Selected; Apply(); BeginInvoke(Build); };
+                IndentRow(st.Display.Label, dd, D(148));
+            }
+            var link = new Label2 { Text = "What each monitor supports", Px = 14, Color = t.TextDim, Link = true };
+            var chev = new Label2 { Text = "", Family = Theme.IconFont, Px = 10, Color = t.TextDim };
+            link.Click += (_, _) => { _page = Page.Displays; Build(); };
+            chev.Click += (_, _) => { _page = Page.Displays; Build(); };
+            var card = NewCard(D(44), link);
+            int lw = TextRenderer.MeasureText(link.Text, Fonts.Get(Theme.TextFont, 14 * S)).Width;
+            link.BackColor = chev.BackColor = card.FillColor;
+            link.SetBounds(D(46), D(12), lw + D(2), D(20));
+            chev.SetBounds(D(46) + lw + D(6), D(12), D(12), D(20));
+            card.Controls.AddRange(new Control[] { link, chev });
         }
+        else
+        {
+            string help = _s.Mode switch
+            {
+                DimMode.Auto => "Overlay normally. Gamma for the game's monitor in exclusive fullscreen.",
+                DimMode.Overlay => "Click-through dark layer. Smooth, deep, works on every monitor.",
+                DimMode.Gamma => "Graphics card gamma. Works in fullscreen games, depth limited by Windows.",
+                _ => "Monitor's own backlight via DDC/CI. Best image, needs monitor support.",
+            };
+            var lbl = new Label2 { Text = help, Px = 12, Color = t.TextDim };
+            var card = NewCard(D(40), lbl);
+            lbl.BackColor = card.FillColor;
+            lbl.SetBounds(D(16), D(10), card.Width - D(32), D(20));
+            card.Controls.Add(lbl);
+        }
+        EndGroup();
 
-        Row("Link monitor levels", "Moving one slider moves all", Toggle(_s.LinkMonitors, v => _s.LinkMonitors = v), D(48), D(28));
-        Row("Hide from screenshots", "Recordings and streams stay bright (overlay only)",
-            Toggle(_s.HideFromCapture, v => { _s.HideFromCapture = v; _dim.Refresh(false); }), D(48), D(28));
+        Header("Behavior");
+        Row("Link monitor levels", "Moving one slider moves all", Toggle(_s.LinkMonitors, v => _s.LinkMonitors = v), D(84), D(24));
+        bool anyOverlay = _dim.States.Any(st => st.Channel == Channel.Overlay);
+        Row("Hide from screenshots", "Recordings and streams stay bright. Overlay method only" + (anyOverlay ? "" : " — no monitor uses it now"),
+            Toggle(_s.HideFromCapture, v => { _s.HideFromCapture = v; _dim.Refresh(false); }), D(84), D(24));
 
         bool unlocked = GammaRamp.IsRangeUnlocked();
-        var unlock = new FlatButton { Text = unlocked ? "Unlocked" : "Unlock", Accent = !unlocked, Enabled = !unlocked, AccessibleName = "unlock" };
-        unlock.Click += (_, _) =>
+        Control right;
+        if (unlocked) right = StatusText("", "Active");
+        else
         {
-            if (!GammaRamp.UnlockRange()) return;
-            unlock.Text = "Sign out to apply"; unlock.Accent = false; unlock.Enabled = false; unlock.Invalidate();
-            GammaRamp.ClearLimits();
-            _dim.RecheckGammaUnlock();
-        };
-        Row("Deeper gamma dimming", unlocked ? "Windows gamma limit is lifted" : "Windows stops gamma near 50%. Needs admin, then sign out",
-            unlock, D(150), D(32));
+            var unlock = new FlatButton { Text = "Unlock", AccessibleName = "unlock" };
+            unlock.Click += (_, _) =>
+            {
+                if (!GammaRamp.UnlockRange()) return;
+                unlock.Text = "Sign out to apply"; unlock.Enabled = false;
+                unlock.Width = unlock.PreferredWidth(); unlock.Left = unlock.Parent!.Width - D(16) - unlock.Width;
+                unlock.Invalidate();
+                GammaRamp.ClearLimits();
+                _dim.RecheckGammaUnlock();
+            };
+            right = unlock;
+        }
+        right.AccessibleName ??= "unlock";
+        Row("Deeper gamma dimming", "Lifts the Windows gamma limit so Gamma can go darker", right,
+            right is FlatButton fb ? fb.PreferredWidth() : D(90), D(32));
     }
 
     private void BuildDisplays()
     {
-        PageTitle("Displays");
+        var t = Theme.Current;
+        PageTitle("Displays", _s.Mode == DimMode.Custom ? "Choose how each monitor gets darker."
+                                                         : "Choose how each monitor gets darker. Picking one switches Method to Per monitor.");
         _displaySig = DisplaySignature();
-        var hint = new Label2 { Px = 12, Color = Theme.Current.TextDim, BackColor = Theme.Current.Bg,
-            Text = _s.Mode == DimMode.Custom ? "Each monitor uses the method chosen here." : "Picking a method here switches Method to Custom." };
-        hint.SetBounds(CPad + D(4), _y - D(6), RowW, D(20));
-        _content.Controls.Add(hint);
-        _y += D(22);
 
         foreach (var st in _dim.States)
         {
@@ -284,24 +362,78 @@ internal sealed class SettingsForm : Form
                 BeginInvoke(Build);
             };
 
-            string hw = st.HwSupported switch { true => "Hardware ✓", false => "Hardware ✗ (DDC/CI off or unsupported)", _ => "Hardware: checking…" };
-            string gm = st.GammaSupported ? "Gamma ✓" : "Gamma ✗";
-            string now = _s.Mode == DimMode.Custom ? $"  ·  now {FlyoutForm.TagText(st)}" : "";
-            BlockRow(st.Display.Label + (st.Display.Primary ? "  (main)" : ""), $"{hw}  ·  {gm}{now}", seg, D(36));
+            int h = D(14 + 42 + 14 + 38 + 16);
+            var card = NewCard(h, seg, gap: D(8));
+            var bg = card.FillColor;
+            var glyph = new Label2 { Text = "", Family = Theme.IconFont, Px = 20, BackColor = bg };
+            glyph.SetBounds(D(16), D(14), D(22), D(22));
+            int x = D(16 + 20 + 14);
+            var nameFont = Fonts.Get(Theme.TextFont, 14 * S, FontStyle.Bold);
+            int nw = Math.Min(TextRenderer.MeasureText(st.Display.Label, nameFont).Width, card.Width - x - D(80));
+            var name = new Label2 { Text = st.Display.Label, Px = 14, Style = FontStyle.Bold, BackColor = bg };
+            name.SetBounds(x, D(14), nw, D(20));
+            card.Controls.AddRange(new Control[] { glyph, name });
+            if (st.Display.Primary)
+            {
+                var main = new Chip { Text = "Main", Outline = true, BackColor = bg };
+                main.SetBounds(x + nw + D(8), D(15), main.PreferredWidth(), D(18));
+                card.Controls.Add(main);
+            }
+
+            // Capabilities: ✓ Hardware (DDC/CI)   ✓ Gamma   ✓ Overlay
+            int cx = x;
+            foreach (var (ok, label) in new (bool? ok, string label)[]
+                     {
+                         (st.HwSupported, st.HwSupported == null ? "Hardware: checking…" : "Hardware (DDC/CI)"),
+                         (st.GammaSupported, "Gamma"),
+                         (true, "Overlay"),
+                     })
+            {
+                string g = ok switch { true => "", false => "", _ => "" };
+                var c = ok == false ? t.TextDisabled : t.TextDim;
+                var ic = new Label2 { Text = g, Family = Theme.IconFont, Px = 10, Color = c, BackColor = bg };
+                ic.SetBounds(cx, D(40), D(12), D(16));
+                int lw = TextRenderer.MeasureText(label, Fonts.Get(Theme.TextFont, 12 * S)).Width;
+                var lb = new Label2 { Text = label, Px = 12, Color = c, BackColor = bg };
+                lb.SetBounds(cx + D(16), D(40), lw + D(2), D(16));
+                card.Controls.AddRange(new Control[] { ic, lb });
+                cx += D(16) + lw + D(14);
+            }
+            if (_s.Mode == DimMode.Custom && st.Fallback)
+            {
+                var now = new Label2 { Text = "now " + FlyoutForm.TagText(st), Px = 12, Color = t.Warning, BackColor = bg };
+                now.SetBounds(cx, D(40), card.Width - cx - D(16), D(16));
+                card.Controls.Add(now);
+            }
+
+            seg.BackColor = bg;
+            seg.SetBounds(D(16), D(14 + 42 + 14), card.Width - D(32), D(38));
+            card.Controls.Add(seg);
         }
 
-        var note = new Label2 { Px = 12, Color = Theme.Current.TextDisabled, BackColor = Theme.Current.Bg,
-            Text = "No hardware? Turn on DDC/CI in the monitor's on-screen menu, then reconnect it." };
-        note.SetBounds(CPad + D(4), _y + D(4), RowW, D(20));
+        // Note
+        _y += D(8);
+        var note = new Card { Fill = t.Note };
+        note.SetBounds(CX, _y, RowW, D(64));
+        var info = new Label2 { Text = "", Family = Theme.IconFont, Px = 16, Color = t.TextDim, BackColor = t.Note };
+        info.SetBounds(D(16), D(14), D(16), D(18));
+        var nt = new Label2 { Text = "No Hardware option?", Px = 14, Style = FontStyle.Bold, BackColor = t.Note };
+        nt.SetBounds(D(44), D(12), note.Width - D(60), D(20));
+        var nd = new Label2 { Text = "Turn on DDC/CI in the monitor’s on-screen menu, then reconnect the cable.", Px = 14, Color = t.TextDim, BackColor = t.Note };
+        nd.SetBounds(D(44), D(32), note.Width - D(60), D(20));
+        note.Controls.AddRange(new Control[] { info, nt, nd });
         _content.Controls.Add(note);
-        _y += D(30);
+        _y += D(64) + D(4);
     }
 
     private void BuildHotkeys()
     {
         PageTitle("Hotkeys");
-        Row("Use hotkeys", "Work everywhere, also in games", Toggle(_s.Hotkeys, v => { _s.Hotkeys = v; _hotkeysChanged(); BeginInvoke(Build); }), D(48), D(28));
+        var t = Theme.Current;
+        Row("Use hotkeys", "Work everywhere, also in games", Toggle(_s.Hotkeys, v => { _s.Hotkeys = v; _hotkeysChanged(); BeginInvoke(Build); }), D(84), D(24));
 
+        Header("Shortcuts");
+        BeginGroup();
         foreach (var a in HotkeyActions.All)
         {
             var box = new HotkeyBox { Value = Hotkey.Parse(HotkeyActions.Get(_s, a)), Enabled = _s.Hotkeys, AccessibleName = "hk:" + a };
@@ -319,95 +451,213 @@ internal sealed class SettingsForm : Form
                 _changed();
                 BeginInvoke(Build);
             };
-            string? desc = null;
-            if (_s.Hotkeys && !box.Value.IsEmpty && !_hotkeyOk(a)) desc = "⚠ Used by another app. Pick another combo";
-            else if (box.Value.IsEmpty) desc = "Click the field and press keys";
-            Row(HotkeyActions.Title(a), desc, box, D(210), D(32));
+            string? desc = _s.Hotkeys && !box.Value.IsEmpty && !_hotkeyOk(a) ? "⚠ Used by another app. Pick another combo" : null;
+            Row(HotkeyActions.Title(a), desc, box, D(200), D(32), compact: true, dim: !_s.Hotkeys);
         }
+        EndGroup();
+        Caption("Click a shortcut, then press the keys. Backspace clears it, Esc cancels.", D(8), t.TextTertiary);
 
-        Row("Step", "How much one press of Dim more / less changes",
-            SliderWithValue(1, 20, _s.HotkeyStep, v => $"{v}%", v => _s.HotkeyStep = v), D(270), D(32));
-        var tip = new Label2 { Px = 12, Color = Theme.Current.TextDisabled, BackColor = Theme.Current.Bg,
-            Text = "Backspace clears a field. Esc cancels." };
-        tip.SetBounds(CPad + D(4), _y + D(4), RowW, D(20));
-        _content.Controls.Add(tip);
-        _y += D(30);
+        _y += D(16);
+        Row("Step", "Change per press of Dim more / Dim less",
+            SliderWithValue(1, 20, _s.HotkeyStep, v => $"{v}%", v => _s.HotkeyStep = v, D(36)), D(180 + 16 + 36), D(32));
     }
 
     private void BuildGeneral()
     {
         PageTitle("General");
-        Row("Start with Windows", null, Toggle(_s.StartWithWindows, v => { _s.StartWithWindows = v; _setStartup(v); }), D(48), D(28));
-        var folder = new FlatButton { Text = "Open folder", Glyph = "\uE8B7" };
+        var t = Theme.Current;
+        Row("Start with Windows", "Runs in the tray after you sign in",
+            Toggle(_s.StartWithWindows, v => { _s.StartWithWindows = v; _setStartup(v); }), D(84), D(24));
+        var folder = new FlatButton { Text = "Open folder", Glyph = "" };
         folder.Click += (_, _) =>
         {
             try { Directory.CreateDirectory(Settings.Dir); System.Diagnostics.Process.Start("explorer.exe", Settings.Dir); } catch { }
         };
-        Row("Settings file", "%AppData%\\BetterDarkScreen\\settings.json", folder, D(150), D(32));
+        Row("Settings file", "%AppData%\\BetterDarkScreen\\settings.json", folder, folder.PreferredWidth(), D(32), mono: true);
 
-        var ver = new Label2 { Text = $"BetterDarkScreen {Application.ProductVersion.Split('+')[0]}", Px = 12, Color = Theme.Current.TextDisabled, BackColor = Theme.Current.Bg };
-        ver.SetBounds(CPad + D(4), _y + D(8), RowW, D(20));
-        _content.Controls.Add(ver);
-        _y += D(36);
+        Header("About");
+        var name = new Label2 { Text = "BetterDarkScreen", Px = 14, Style = FontStyle.Bold };
+        var card = NewCard(D(72), name);
+        var bg = card.FillColor;
+        var mark = new BrandView { Art = BrandView.Kind.MarkRaster, Shadow = 2, BackColor = bg };
+        mark.SetBounds(D(16), D(16), D(37), D(42));
+        name.BackColor = bg;
+        name.SetBounds(D(16 + 35 + 16), D(18), card.Width - D(90), D(20));
+        var ver = new Label2 { Text = $"Version {Application.ProductVersion.Split('+')[0]}", Px = 12, Color = t.TextDim, BackColor = bg };
+        ver.SetBounds(D(16 + 35 + 16), D(38), card.Width - D(90), D(16));
+        var open = new Label2
+        {
+            Text = "\uE8A7", Family = Theme.IconFont, Px = 14, Color = t.TextDim, BackColor = bg,
+            Flags = TextFormatFlags.Right | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding
+        };
+        open.SetBounds(card.Width - D(40), D(26), D(24), D(20));
+        card.Controls.AddRange(new Control[] { mark, name, ver, open });
+        ver.Text += "  ·  github.com/dehobitto/BetterDarkScreen";
+        foreach (Control c in card.Controls.Cast<Control>().Append(card))
+        {
+            c.Cursor = Cursors.Hand;
+            c.Click += (_, _) => OpenUrl(RepoUrl);
+        }
+        card.AccessibleName = "Open BetterDarkScreen on GitHub";
+    }
+
+    private const string RepoUrl = "https://github.com/dehobitto/BetterDarkScreen";
+
+    private static void OpenUrl(string url)
+    {
+        try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(url) { UseShellExecute = true }); } catch { }
     }
 
     // ------------------------------------------------------------ building blocks
 
-    private void PageTitle(string title)
+    private void PageTitle(string title, string? subtitle = null)
     {
         var h = new Label2 { Text = title, Px = 28, Style = FontStyle.Bold, Family = Theme.DisplayFont, BackColor = Theme.Current.Bg };
-        h.SetBounds(CPad, _y, RowW, D(44));
+        h.SetBounds(CX, _y, RowW, D(36));
         _content.Controls.Add(h);
-        _y += D(60);
+        _y += D(36);
+        if (subtitle == null) { _y += D(24); return; }
+        _y += D(4);
+        var sub = new Label2 { Text = subtitle, Px = 14, Color = Theme.Current.TextDim, BackColor = Theme.Current.Bg };
+        sub.SetBounds(CX, _y, RowW, D(20));
+        _content.Controls.Add(sub);
+        _y += D(20) + D(20);
     }
 
-    private Card NewCard(int h, Control control)
+    /// <summary>Group header ("Behavior", "Shortcuts", "About").</summary>
+    private void Header(string text)
+    {
+        EndGroup();
+        _y += D(28) - D(4); // previous card already added 4 below itself
+        var h = new Label2 { Text = text, Px = 14, Style = FontStyle.Bold, BackColor = Theme.Current.Bg };
+        h.SetBounds(CX + D(2), _y, RowW, D(20));
+        _content.Controls.Add(h);
+        _y += D(20) + D(8);
+    }
+
+    private Label2 Caption(string text, int top = 0, Color? color = null)
+    {
+        EndGroup();
+        var t = Theme.Current;
+        var l = new Label2 { Text = text, Px = 12, Color = color ?? t.TextDim, BackColor = t.Bg };
+        _y += top;
+        l.SetBounds(CX + D(2), _y, RowW, D(16));
+        _content.Controls.Add(l);
+        _y += D(16) + D(4);
+        return l;
+    }
+
+    /// <summary>Cards added until <see cref="EndGroup"/> are stacked 2 px apart and share outer corners.</summary>
+    private void BeginGroup() { EndGroup(); _group = new List<Card>(); }
+
+    private void EndGroup()
+    {
+        if (_group == null) return;
+        var g = _group; _group = null;
+        for (int i = 0; i < g.Count; i++)
+        {
+            g[i].RadiusTop = i == 0 ? 6 : 0;
+            g[i].RadiusBottom = i == g.Count - 1 ? 6 : 0;
+        }
+        if (g.Count > 0) _y += D(2); // groups end with the normal 4 px gap
+    }
+
+    private Card NewCard(int h, Control control, int? gap = null)
     {
         var card = new Card { Highlight = _highlight != null && control.AccessibleName == _highlight };
-        card.SetBounds(CPad, _y, RowW, h);
+        card.SetBounds(CX, _y, RowW, h);
         _content.Controls.Add(card);
-        _y += h + D(4);
+        _y += h + (gap ?? (_group != null ? D(2) : D(4)));
+        _group?.Add(card);
         return card;
     }
 
-    /// <summary>Win11 settings card: title + description left, control right.</summary>
-    private void Row(string title, string? desc, Control control, int cw, int ch)
+    /// <summary>Settings card: title (+ description) left, control right. Min height 64 (52 when compact).</summary>
+    private void Row(string title, string? desc, Control control, int cw, int ch, bool compact = false, bool mono = false, bool dim = false)
     {
         var t = Theme.Current;
         control.AccessibleName ??= title;
-        int h = D(desc == null ? 60 : 68);
+        int ip = D(16);
+        int textW = RowW - ip * 2 - D(16) - cw;
+        var descFont = Fonts.Get(mono ? Theme.MonoFont : Theme.TextFont, 12 * S);
+        int descH = 0;
+        if (desc != null)
+        {
+            var sz = TextRenderer.MeasureText(desc, descFont, new Size(textW, int.MaxValue), TextFormatFlags.WordBreak | TextFormatFlags.NoPadding);
+            descH = Math.Max(D(16), sz.Height);
+        }
+        int textH = D(20) + descH;
+        int h = Math.Max(D(desc == null && compact ? 52 : 64), textH + D(24));
         var card = NewCard(h, control);
-        int ip = D(18);
-        int textW = card.Width - ip * 3 - cw;
-        var tl = new Label2 { Text = title, Px = 14, BackColor = t.Card };
-        tl.SetBounds(ip, desc == null ? (h - D(22)) / 2 : D(13), textW, D(22));
+        var bg = card.FillColor;
+        int ty = (h - textH) / 2;
+        var tl = new Label2 { Text = title, Px = 14, BackColor = bg, Color = dim ? t.TextDisabled : null };
+        tl.SetBounds(ip, ty, textW, D(20));
         card.Controls.Add(tl);
         if (desc != null)
         {
-            var dl = new Label2 { Text = desc, Px = 12, Color = desc.StartsWith("⚠") ? t.Warning : t.TextDim, BackColor = t.Card };
-            dl.SetBounds(ip, D(36), textW, D(20));
+            var dl = new Label2
+            {
+                Text = desc, Px = 12, Family = mono ? Theme.MonoFont : Theme.TextFont, BackColor = bg,
+                Color = desc.StartsWith("⚠") ? t.Warning : dim ? t.TextDisabled : t.TextDim,
+                Flags = TextFormatFlags.WordBreak | TextFormatFlags.NoPadding | TextFormatFlags.EndEllipsis,
+            };
+            dl.SetBounds(ip, ty + D(20), textW, descH);
             card.Controls.Add(dl);
         }
-        SetBg(control, t.Card);
+        SetBg(control, bg);
         control.SetBounds(card.Width - ip - cw, (h - ch) / 2, cw, ch);
         card.Controls.Add(control);
     }
 
-    /// <summary>Card with the control on its own line under the text (for wide selectors).</summary>
-    private void BlockRow(string title, string desc, Control control, int ch)
+    /// <summary>Card with title + description on top and a full-width selector under it.</summary>
+    private void BlockRow(string title, string desc, Control control)
     {
         var t = Theme.Current;
         control.AccessibleName ??= title;
-        int h = D(68) + ch + D(14);
+        int ip = D(16), ch = D(38);
+        int h = D(14) + D(36) + D(12) + ch + D(16);
         var card = NewCard(h, control);
-        int ip = D(18);
-        var tl = new Label2 { Text = title, Px = 14, BackColor = t.Card };
-        tl.SetBounds(ip, D(13), card.Width - ip * 2, D(22));
-        var dl = new Label2 { Text = desc, Px = 12, Color = t.TextDim, BackColor = t.Card };
-        dl.SetBounds(ip, D(36), card.Width - ip * 2, D(20));
-        SetBg(control, t.Card);
-        control.SetBounds(ip, D(66), card.Width - ip * 2, ch);
+        var bg = card.FillColor;
+        var tl = new Label2 { Text = title, Px = 14, BackColor = bg };
+        tl.SetBounds(ip, D(14), card.Width - ip * 2, D(20));
+        var dl = new Label2 { Text = desc, Px = 12, Color = t.TextDim, BackColor = bg };
+        dl.SetBounds(ip, D(34), card.Width - ip * 2, D(16));
+        SetBg(control, bg);
+        control.SetBounds(ip, D(14 + 36 + 12), card.Width - ip * 2, ch);
         card.Controls.AddRange(new[] { tl, dl, control });
+    }
+
+    /// <summary>Indented sub-row inside a group: monitor glyph, name, control on the right.</summary>
+    private void IndentRow(string title, Control control, int cw)
+    {
+        var t = Theme.Current;
+        var card = NewCard(D(52), control);
+        var bg = card.FillColor;
+        var glyph = new Label2 { Text = "", Family = Theme.IconFont, Px = 16, Color = t.TextDim, BackColor = bg };
+        glyph.SetBounds(D(46), D(16), D(16), D(20));
+        var tl = new Label2 { Text = title, Px = 14, BackColor = bg };
+        tl.SetBounds(D(74), D(16), card.Width - D(74) - cw - D(32), D(20));
+        SetBg(control, bg);
+        control.SetBounds(card.Width - D(16) - cw, D(10), cw, D(32));
+        card.Controls.AddRange(new[] { glyph, tl, control });
+    }
+
+    /// <summary>"✓ Active" style status in place of a control.</summary>
+    private Control StatusText(string glyph, string text)
+    {
+        var t = Theme.Current;
+        var wrap = new Panel();
+        var ic = new Label2 { Text = glyph, Family = Theme.IconFont, Px = 12, Color = t.TextDim, Flags = TextFormatFlags.Right | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding };
+        var lb = new Label2 { Text = text, Px = 14, Color = t.TextDim, Flags = TextFormatFlags.Right | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding };
+        wrap.Resize += (_, _) =>
+        {
+            int lw = TextRenderer.MeasureText(text, Fonts.Get(Theme.TextFont, 14 * S)).Width + D(2);
+            lb.SetBounds(wrap.Width - lw, 0, lw, wrap.Height);
+            ic.SetBounds(wrap.Width - lw - D(22), 0, D(14), wrap.Height);
+        };
+        wrap.Controls.AddRange(new Control[] { ic, lb });
+        return wrap;
     }
 
     private static void SetBg(Control c, Color bg)
@@ -416,18 +666,18 @@ internal sealed class SettingsForm : Form
         foreach (Control k in c.Controls) if (k is not TextBox) SetBg(k, bg);
     }
 
-    private Control SliderWithValue(int min, int max, int value, Func<int, string> fmt, Action<int> set)
+    private Control SliderWithValue(int min, int max, int value, Func<int, string> fmt, Action<int> set, int valueW)
     {
         var wrap = new Panel();
-        var lbl = new Label2 { Text = fmt(value), Flags = TextFormatFlags.Right | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding };
+        var lbl = new Label2 { Text = fmt(value), Px = 14, Flags = TextFormatFlags.Right | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding };
         var sl = new FlatSlider { Minimum = min, Maximum = max, LargeChange = Math.Max(1, (max - min) / 9) };
         sl.SetSilently(value);
         sl.ValueChanged += (_, _) => { lbl.Text = fmt(sl.Value); set(sl.Value); };
         sl.Committed += (_, _) => _changed();
         wrap.Resize += (_, _) =>
         {
-            sl.SetBounds(0, 0, wrap.Width - D(64), wrap.Height);
-            lbl.SetBounds(wrap.Width - D(60), 0, D(60), wrap.Height);
+            sl.SetBounds(0, 0, wrap.Width - valueW - D(16), wrap.Height);
+            lbl.SetBounds(wrap.Width - valueW, 0, valueW, wrap.Height);
         };
         wrap.Controls.AddRange(new Control[] { sl, lbl });
         return wrap;
@@ -442,7 +692,7 @@ internal sealed class SettingsForm : Form
 
     private ToggleSwitch Toggle(bool value, Action<bool> set)
     {
-        var tg = new ToggleSwitch();
+        var tg = new ToggleSwitch { ShowState = true };
         tg.SetSilently(value);
         tg.CheckedChanged += (_, _) => { set(tg.Checked); Apply(); };
         return tg;

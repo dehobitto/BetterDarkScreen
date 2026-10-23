@@ -16,6 +16,23 @@ dotnet run --project src
 .\build.ps1          # release single-file exe in .\publish
 ```
 
+## Lint
+
+CI runs `dotnet format --verify-no-changes` (rules in `.editorconfig`) and builds with warnings as errors. Before pushing:
+
+```powershell
+dotnet format src\BetterDarkScreen.csproj --severity warn   # fixes formatting / style
+```
+
+## Releases
+
+Releases are automatic. To ship a new version:
+
+1. Bump `<Version>` in `src/BetterDarkScreen.csproj` (e.g. `1.0.0` → `1.1.0`).
+2. Push to `main`.
+
+CI builds the exe, creates the tag `v<Version>` and publishes a GitHub release with `BetterDarkScreen.exe` and its SHA-256. Pushes that don't change the version only build; they don't make a release.
+
 ## Pull requests
 
 1. Fork and branch from `main`.

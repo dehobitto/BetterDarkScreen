@@ -1,5 +1,3 @@
-using System.Drawing;
-
 namespace BetterDarkScreen;
 
 /// <summary>
@@ -86,13 +84,13 @@ internal sealed class OverlayWindow : NativeWindow, IDisposable
                 m.Result = 1;
                 return;
             case Native.WM_PAINT:
-            {
-                IntPtr hdc = Native.BeginPaint(m.HWnd, out var ps);
-                Native.FillRect(hdc, ref ps.rcPaint, Native.GetStockObject(Native.BLACK_BRUSH));
-                Native.EndPaint(m.HWnd, ref ps);
-                m.Result = IntPtr.Zero;
-                return;
-            }
+                {
+                    IntPtr hdc = Native.BeginPaint(m.HWnd, out var ps);
+                    Native.FillRect(hdc, ref ps.rcPaint, Native.GetStockObject(Native.BLACK_BRUSH));
+                    Native.EndPaint(m.HWnd, ref ps);
+                    m.Result = IntPtr.Zero;
+                    return;
+                }
             case Native.WM_NCHITTEST:
                 m.Result = Native.HTTRANSPARENT;
                 return;

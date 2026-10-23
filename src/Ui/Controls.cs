@@ -1,5 +1,5 @@
 using System.ComponentModel;
-using System.Drawing;
+using System.Diagnostics.CodeAnalysis;
 using System.Drawing.Drawing2D;
 
 namespace BetterDarkScreen.Ui;
@@ -43,11 +43,13 @@ internal abstract class FlatControl : Control
     }
 }
 
-/// <summary>Win11 toggle switch.</summary>
+/// <summary>Win11 toggle switch (40×20, knob 12). Optional "On"/"Off" caption on the left.</summary>
 internal sealed class ToggleSwitch : FlatControl
 {
     private bool _on;
     public event EventHandler? CheckedChanged;
+    /// <summary>Draw "On"/"Off" left of the switch (settings rows).</summary>
+    public bool ShowState { get; set; }
 
     public ToggleSwitch() { TabStop = true; }
 
@@ -73,23 +75,31 @@ internal sealed class ToggleSwitch : FlatControl
         var g = Prep(e);
         float s = S, w = 40 * s, h = 20 * s;
         var r = new RectangleF(Width - w - 1, (Height - h) / 2f, w, h);
-        float knob = (Hover ? 14 : 12) * s;
-        if (Pressed) knob = 14 * s;
+        float knob = (Hover || Pressed ? 14 : 12) * s;
+        var off = Enabled ? T.TextDim : T.TextDisabled;
+
+        if (ShowState)
+        {
+            var tr = new Rectangle(0, 0, (int)(r.X - 12 * s), Height);
+            TextRenderer.DrawText(g, _on ? "On" : "Off", Fonts.Get(Theme.TextFont, 14 * s), tr, Enabled ? T.Text : T.TextDisabled,
+                TextFormatFlags.Right | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.NoPadding);
+        }
 
         if (_on)
         {
-            Theme.FillRound(g, Enabled ? (Hover ? T.AccentHover : T.Accent) : T.TextDisabled, r, h / 2);
-            var k = new RectangleF(r.Right - h / 2 - knob / 2, r.Y + (h - knob) / 2, knob, knob);
+            var fill = Enabled ? (Hover ? T.AccentHover : T.Accent) : T.TextDisabled;
+            Theme.FillRound(g, fill, r, h / 2);
+            var k = new RectangleF(r.Right - 3 * s - 6 * s - knob / 2, r.Y + (h - knob) / 2, knob, knob);
             using var b = new SolidBrush(T.OnAccent);
             g.FillEllipse(b, k);
         }
         else
         {
-            if (Hover) Theme.FillRound(g, T.ControlHover, r, h / 2);
+            if (Hover && Enabled) Theme.FillRound(g, T.ControlHover, r, h / 2);
             var rr = r; rr.Inflate(-0.5f * s, -0.5f * s);
-            Theme.StrokeRound(g, Enabled ? T.TextDim : T.TextDisabled, rr, h / 2, 1f * s);
-            var k = new RectangleF(r.X + h / 2 - knob / 2, r.Y + (h - knob) / 2, knob, knob);
-            using var b = new SolidBrush(Enabled ? T.TextDim : T.TextDisabled);
+            Theme.StrokeRound(g, off, rr, h / 2, 1f * s);
+            var k = new RectangleF(r.X + 3 * s + 6 * s - knob / 2, r.Y + (h - knob) / 2, knob, knob);
+            using var b = new SolidBrush(off);
             g.FillEllipse(b, k);
         }
         DrawFocus(g, r, h / 2);
@@ -129,7 +139,7 @@ internal sealed class FlatSlider : FlatControl
     {
         get
         {
-            float pad = 11 * S;
+            float pad = 10 * S;
             return new RectangleF(pad, Height / 2f - 2 * S, Width - pad * 2, 4 * S);
         }
     }
@@ -192,15 +202,15 @@ internal sealed class FlatSlider : FlatControl
         var g = Prep(e);
         var t = Track;
         float s = S;
-        Theme.FillRound(g, T.Track, t, t.Height / 2);
+        Theme.FillRound(g, T.SliderTrack, t, t.Height / 2);
         var fill = new RectangleF(t.X, t.Y, Math.Max(t.Height, t.Width * Frac), t.Height);
         Theme.FillRound(g, Enabled ? T.Accent : T.TextDisabled, fill, t.Height / 2);
 
         float cx = t.X + t.Width * Frac, cy = Height / 2f;
         float outer = 20 * s;
         var o = new RectangleF(cx - outer / 2, cy - outer / 2, outer, outer);
-        using (var b = new SolidBrush(T.Control)) g.FillEllipse(b, o);
-        using (var p = new Pen(T.ControlBorder, 1 * s)) g.DrawEllipse(p, o);
+        using (var b = new SolidBrush(T.Thumb)) g.FillEllipse(b, o);
+        using (var p = new Pen(T.ThumbBorder, 1 * s)) g.DrawEllipse(p, RectangleF.Inflate(o, -0.5f * s, -0.5f * s));
         float inner = (_drag ? 10 : Hover ? 14 : 12) * s;
         using (var b = new SolidBrush(Enabled ? (Hover ? T.AccentHover : T.Accent) : T.TextDisabled))
             g.FillEllipse(b, cx - inner / 2, cy - inner / 2, inner, inner);
@@ -247,8 +257,11 @@ internal sealed class Segmented : FlatControl
 
     private RectangleF Cell(int i)
     {
-        float w = (Width - 1f) / Math.Max(1, _items.Length);
-        return new RectangleF(i * w, 0, w, Height - 1f);
+        // Track has 1px border + 2px padding, 2px gap between cells.
+        float s = S, pad = 3 * s, gap = 2 * s;
+        int n = Math.Max(1, _items.Length);
+        float w = (Width - pad * 2 - gap * (n - 1)) / n;
+        return new RectangleF(pad + i * (w + gap), pad, w, Height - pad * 2);
     }
 
     private int HitTest(Point p)
@@ -274,32 +287,30 @@ internal sealed class Segmented : FlatControl
     protected override void OnPaint(PaintEventArgs e)
     {
         var g = Prep(e);
-        float s = S, rad = 5 * s;
+        float s = S, rad = 6 * s;
         var all = new RectangleF(0.5f, 0.5f, Width - 1.5f, Height - 1.5f);
-        Theme.FillRound(g, T.Dark ? Theme.Blend(T.Bg, Color.Black, 0.15) : Theme.Hex(0xEDEDED), all, rad);
-        Theme.StrokeRound(g, T.ControlBorder, all, rad, 1f);
+        Theme.FillRound(g, T.SegTrack, all, rad);
+        Theme.StrokeRound(g, T.SegBorder, all, rad, 1f);
 
-        var font = Fonts.Get(Theme.TextFont, 13 * s);
         for (int i = 0; i < _items.Length; i++)
         {
             var c = Cell(i);
-            var inner = RectangleF.Inflate(c, -3 * s, -3 * s);
-            bool dis = IsDisabled(i);
-            Color fg = dis ? T.TextDisabled : (i == _sel ? T.Text : T.TextDim);
-            if (i == _sel)
+            bool dis = IsDisabled(i), sel = i == _sel;
+            Color fg = dis ? T.TextDisabled : (sel ? T.Text : T.TextDim);
+            if (sel)
             {
-                Theme.FillRound(g, T.Selected, inner, 4 * s);
-                if (!T.Dark) Theme.StrokeRound(g, T.CardBorder, inner, 4 * s, 1f);
+                Theme.FillRound(g, T.SegSelected, c, 4 * s);
+                if (!T.Dark) Theme.StrokeRound(g, T.CardBorder, c, 4 * s, 1f);
                 float uw = 16 * s, uh = 3 * s;
-                Theme.FillRound(g, T.Accent, new RectangleF(inner.X + (inner.Width - uw) / 2, inner.Bottom - uh - 1 * s, uw, uh), uh / 2);
+                Theme.FillRound(g, T.Accent, new RectangleF(c.X + (c.Width - uw) / 2, c.Bottom - uh - 2 * s, uw, uh), uh / 2);
             }
             else if (i == _hot && !dis)
             {
-                Theme.FillRound(g, T.ControlHover, inner, 4 * s);
+                Theme.FillRound(g, Theme.Blend(T.SegTrack, T.Text, 0.06), c, 4 * s);
                 fg = T.Text;
             }
-
-            var tr = Rectangle.Round(new RectangleF(c.X + 2 * s, c.Y, c.Width - 4 * s, c.Height - (i == _sel ? 2 * s : 0)));
+            var font = Fonts.Get(Theme.TextFont, 14 * s, sel ? FontStyle.Bold : FontStyle.Regular);
+            var tr = Rectangle.Round(new RectangleF(c.X + 2 * s, c.Y, c.Width - 4 * s, c.Height - (sel ? 2 * s : 0)));
             TextRenderer.DrawText(g, _items[i], font, tr, fg,
                 TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.EndEllipsis | TextFormatFlags.SingleLine | TextFormatFlags.NoPadding);
         }
@@ -366,24 +377,61 @@ internal sealed class HotkeyBox : FlatControl
         var g = Prep(e);
         float s = S, rad = 4 * s;
         var r = new RectangleF(0.5f, 0.5f, Width - 1.5f, Height - 1.5f);
-        Theme.FillRound(g, _capturing ? T.Card : Hover ? T.ControlHover : T.Control, r, rad);
-        Theme.StrokeRound(g, _capturing ? T.Accent : T.ControlBorder, r, rad, _capturing ? 1.5f * s : 1f);
+        var small = Fonts.Get(Theme.TextFont, 12 * s);
+        var flags = TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.NoPadding;
 
-        string text; Color fg;
         if (_capturing)
         {
+            Theme.FillRound(g, T.Control, r, rad);
+            Theme.StrokeRound(g, T.Text, r, rad, 1f * s);
             var live = new List<string>();
             if ((ModifierKeys & Keys.Control) != 0) live.Add("Ctrl");
             if ((ModifierKeys & Keys.Alt) != 0) live.Add("Alt");
             if ((ModifierKeys & Keys.Shift) != 0) live.Add("Shift");
-            text = live.Count > 0 ? string.Join(" + ", live) + " + …" : "Press keys…";
-            fg = T.Accent;
+            if (live.Count > 0) { live.Add("…"); DrawCaps(g, live, r); }
+            else TextRenderer.DrawText(g, "Press keys…", Fonts.Get(Theme.TextFont, 13 * s), Rectangle.Round(r), T.Text, flags | TextFormatFlags.HorizontalCenter);
         }
-        else if (_value.IsEmpty) { text = "Not set"; fg = T.TextDisabled; }
-        else { text = _value.Display(); fg = T.Text; }
+        else if (_value.IsEmpty)
+        {
+            using (var path = Theme.RoundRect(r, rad))
+            using (var pen = new Pen(Hover && Enabled ? T.TextDim : T.Dashed, 1f) { DashPattern = new[] { 3f, 2f } })
+                g.DrawPath(pen, path);
+            const string label = "Set shortcut";
+            int tw = TextRenderer.MeasureText(g, label, small, Size.Empty, flags).Width, iw = (int)(12 * s), gap = (int)(6 * s);
+            int x = (Width - tw - iw - gap) / 2;
+            TextRenderer.DrawText(g, "\uE710", Fonts.Get(Theme.IconFont, 10 * s), new Rectangle(x, 0, iw, Height), T.TextDim, flags | TextFormatFlags.HorizontalCenter);
+            TextRenderer.DrawText(g, label, small, new Rectangle(x + iw + gap, 0, tw + 2, Height), T.TextDim, flags);
+        }
+        else
+        {
+            Theme.FillRound(g, Hover && Enabled ? T.ControlHover : T.Control, r, rad);
+            Theme.StrokeRound(g, T.ControlBorder, r, rad, 1f);
+            DrawCaps(g, _value.Display().Split(" + ").ToList(), r);
+        }
 
-        TextRenderer.DrawText(g, text, Fonts.Get(Theme.TextFont, 13 * s), Rectangle.Round(r), fg,
-            TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.EndEllipsis);
+        if (!Enabled)
+            using (var b = new SolidBrush(Color.FromArgb(153, BackColor))) g.FillRectangle(b, ClientRectangle);
+        DrawFocus(g, r, rad);
+    }
+
+    /// <summary>Keycaps, right-aligned: Ctrl  Alt  PgDn.</summary>
+    private void DrawCaps(Graphics g, List<string> keys, RectangleF r)
+    {
+        float s = S;
+        var font = Fonts.Get(Theme.TextFont, 12 * s);
+        var flags = TextFormatFlags.VerticalCenter | TextFormatFlags.HorizontalCenter | TextFormatFlags.SingleLine | TextFormatFlags.NoPadding;
+        var widths = keys.Select(k => TextRenderer.MeasureText(g, k, font, Size.Empty, flags).Width + 14 * s).ToList();
+        float gap = 4 * s, h = 18 * s;
+        float x = r.Right - 8 * s - widths.Sum() - gap * (keys.Count - 1);
+        float y = r.Y + (r.Height - h) / 2;
+        for (int i = 0; i < keys.Count; i++)
+        {
+            var cap = new RectangleF(x, y, widths[i], h);
+            Theme.FillRound(g, T.KeycapEdge, new RectangleF(cap.X, cap.Y + 1 * s, cap.Width, cap.Height), 3 * s);
+            Theme.FillRound(g, T.Keycap, cap, 3 * s);
+            TextRenderer.DrawText(g, keys[i], font, Rectangle.Round(cap), T.Text, flags);
+            x += widths[i] + gap;
+        }
     }
 }
 
@@ -405,13 +453,14 @@ internal sealed class NavItem : FlatControl
     {
         var g = Prep(e);
         float s = S;
-        var r = new RectangleF(0, 2 * s, Width - 1, Height - 4 * s);
-        if (Selected || Hover) Theme.FillRound(g, Selected ? T.Card : T.ControlHover, r, 4 * s);
+        var r = new RectangleF(0, 0, Width - 1, Height - 1);
+        if (Selected) Theme.FillRound(g, T.NavSelected, r, 4 * s);
+        else if (Hover) Theme.FillRound(g, Theme.Blend(BackColor, T.Text, 0.04), r, 4 * s);
         if (Selected)
-            Theme.FillRound(g, T.Accent, new RectangleF(0, r.Y + (r.Height - 16 * s) / 2, 3 * s, 16 * s), 1.5f * s);
+            Theme.FillRound(g, T.Accent, new RectangleF(0, (Height - 16 * s) / 2, 3 * s, 16 * s), 1.5f * s);
         var flags = TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.NoPadding;
-        TextRenderer.DrawText(g, Glyph, Fonts.Get(Theme.IconFont, 15 * s), new Rectangle((int)(14 * s), 0, (int)(20 * s), Height), T.Text, flags);
-        TextRenderer.DrawText(g, Text, Fonts.Get(Theme.TextFont, 14 * s), new Rectangle((int)(46 * s), 0, Width - (int)(50 * s), Height), T.Text, flags | TextFormatFlags.EndEllipsis);
+        TextRenderer.DrawText(g, Glyph, Fonts.Get(Theme.IconFont, 16 * s), new Rectangle((int)(12 * s), 0, (int)(18 * s), Height), T.Text, flags);
+        TextRenderer.DrawText(g, Text, Fonts.Get(Theme.TextFont, 14 * s), new Rectangle((int)(42 * s), 0, Width - (int)(46 * s), Height), T.Text, flags | TextFormatFlags.EndEllipsis);
         DrawFocus(g, r, 4 * s);
     }
 }
@@ -433,6 +482,16 @@ internal sealed class FlatButton : FlatControl
         base.OnKeyDown(e);
     }
 
+    /// <summary>Width that fits glyph + text with Win11 padding (14 px each side).</summary>
+    public int PreferredWidth()
+    {
+        float s = S;
+        int textW = string.IsNullOrEmpty(Text) ? 0 : TextRenderer.MeasureText(Text, Fonts.Get(Theme.TextFont, 14 * s)).Width;
+        int iconW = string.IsNullOrEmpty(Glyph) ? 0 : (int)(16 * s);
+        int gap = textW > 0 && iconW > 0 ? (int)(8 * s) : 0;
+        return textW + iconW + gap + (int)(28 * s);
+    }
+
     protected override void OnPaint(PaintEventArgs e)
     {
         var g = Prep(e);
@@ -448,14 +507,20 @@ internal sealed class FlatButton : FlatControl
         {
             if (!Subtle || Hover || Pressed)
             {
-                Theme.FillRound(g, Pressed ? T.Control : Hover ? T.ControlHover : T.Control, r, rad);
-                if (!Subtle) Theme.StrokeRound(g, T.ControlBorder, r, rad, 1f);
+                var bg = Pressed ? Theme.Blend(T.Control, BackColor, 0.4) : Hover ? T.ControlHover : T.Control;
+                Theme.FillRound(g, bg, r, rad);
+                if (!Subtle)
+                {
+                    Theme.StrokeRound(g, T.ControlBorder, r, rad, 1f);
+                    using var p = new Pen(T.ControlBottom, 1f);
+                    g.DrawLine(p, r.X + rad, r.Bottom, r.Right - rad, r.Bottom);
+                }
             }
             fg = Enabled ? (Pressed ? T.TextDim : T.Text) : T.TextDisabled;
         }
 
-        var font = Fonts.Get(Theme.TextFont, 13 * s);
-        var icon = Fonts.Get(Theme.IconFont, 14 * s);
+        var font = Fonts.Get(Theme.TextFont, 14 * s);
+        var icon = Fonts.Get(Theme.IconFont, 16 * s);
         var flags = TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding | TextFormatFlags.SingleLine;
         int textW = string.IsNullOrEmpty(Text) ? 0 : TextRenderer.MeasureText(g, Text, font, Size.Empty, flags).Width;
         int iconW = string.IsNullOrEmpty(Glyph) ? 0 : (int)(16 * s);
@@ -511,6 +576,7 @@ internal sealed class FieldBox : FlatControl
         TabStop = false;
     }
 
+    [AllowNull]
     public override string Text { get => Box.Text; set => Box.Text = value; }
 
     protected override void OnClick(EventArgs e) { Box.Focus(); base.OnClick(e); }
@@ -546,16 +612,22 @@ internal sealed class FieldBox : FlatControl
     }
 }
 
-/// <summary>Rounded card container.</summary>
+/// <summary>Rounded card container. Cards in a group get square inner corners (6 on top / bottom only).</summary>
 internal sealed class Card : Panel
 {
     /// <summary>Accent outline to draw attention (e.g. after a "go to setting" link).</summary>
     public bool Highlight { get; set; }
+    public float RadiusTop { get; set; } = 6;
+    public float RadiusBottom { get; set; } = 6;
+    public Color? Fill { get; set; }
+    public Color? Border { get; set; }
 
     public Card()
     {
         SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.UserPaint | ControlStyles.ResizeRedraw, true);
     }
+
+    public Color FillColor => Fill ?? Theme.Current.Card;
 
     protected override void OnPaint(PaintEventArgs e)
     {
@@ -565,12 +637,130 @@ internal sealed class Card : Panel
         g.SmoothingMode = SmoothingMode.AntiAlias;
         float s = DeviceDpi / 96f;
         var r = new RectangleF(0.5f, 0.5f, Width - 1.5f, Height - 1.5f);
-        Theme.FillRound(g, t.Card, r, 6 * s);
-        if (Highlight)
+        using (var path = Theme.RoundRect(r, RadiusTop * s, RadiusBottom * s))
         {
-            var h = RectangleF.Inflate(r, -1 * s, -1 * s);
-            Theme.StrokeRound(g, t.Accent, h, 6 * s, 2 * s);
+            using (var b = new SolidBrush(FillColor)) g.FillPath(b, path);
+            using var p = Highlight ? new Pen(t.Accent, 2 * s) : new Pen(Border ?? t.CardBorder, 1f);
+            g.DrawPath(p, path);
         }
-        else Theme.StrokeRound(g, t.CardBorder, r, 6 * s, 1f);
+    }
+}
+
+/// <summary>Small rounded tag: filled ("Waiting", "Gamma") or outlined ("Main").</summary>
+internal sealed class Chip : FlatControl
+{
+    public bool Outline { get; set; }
+    public Color? Fore { get; set; }
+    public Chip() { TabStop = false; SetStyle(ControlStyles.Selectable, false); }
+
+    protected override void OnTextChanged(EventArgs e) { Width = PreferredWidth(); Invalidate(); base.OnTextChanged(e); }
+
+    public int PreferredWidth() => string.IsNullOrEmpty(Text) ? 0
+        : TextRenderer.MeasureText(Text, Fonts.Get(Theme.TextFont, 12 * S), Size.Empty, TextFormatFlags.NoPadding | TextFormatFlags.SingleLine).Width + (int)(12 * S) + 2;
+
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        var g = Prep(e);
+        if (string.IsNullOrEmpty(Text)) return;
+        float s = S, h = 18 * s;
+        var r = new RectangleF(0.5f, (Height - h) / 2, Width - 1.5f, h);
+        if (Outline) Theme.StrokeRound(g, T.Thumb, r, 4 * s, 1f);
+        else Theme.FillRound(g, T.Chip, r, 4 * s);
+        TextRenderer.DrawText(g, Text, Fonts.Get(Theme.TextFont, 12 * s), Rectangle.Round(r), Fore ?? T.TextDim,
+            TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.NoPadding);
+    }
+}
+
+/// <summary>Win11 combo box: current value + chevron, opens a menu of choices.</summary>
+internal sealed class DropDown : FlatControl
+{
+    private string[] _items = Array.Empty<string>();
+    private bool[] _disabled = Array.Empty<bool>();
+    private int _sel;
+    private PopupMenu? _menu;
+    public event EventHandler? SelectedChanged;
+
+    public DropDown() { TabStop = true; }
+
+    public string[] Items { get => _items; set { _items = value; _disabled = new bool[value.Length]; Invalidate(); } }
+    public void SetDisabled(int i, bool d) { if (i >= 0 && i < _disabled.Length) _disabled[i] = d; }
+    public int Selected
+    {
+        get => _sel;
+        set { if (value == _sel || value < 0 || value >= _items.Length) return; _sel = value; Invalidate(); SelectedChanged?.Invoke(this, EventArgs.Empty); }
+    }
+    public void SetSilently(int v) { _sel = Math.Clamp(v, 0, Math.Max(0, _items.Length - 1)); Invalidate(); }
+    /// <summary>True while the choice menu is open (owner popups should not close).</summary>
+    public bool MenuOpen => _menu != null;
+    public event EventHandler? MenuClosed;
+
+    protected override void OnClick(EventArgs e) { Focus(); Open(); base.OnClick(e); }
+    protected override bool IsInputKey(Keys k) => k is Keys.Up or Keys.Down || base.IsInputKey(k);
+    protected override void OnKeyDown(KeyEventArgs e)
+    {
+        if (e.KeyCode is Keys.Space or Keys.Enter || (e.KeyCode == Keys.Down && e.Alt)) { Open(); e.Handled = true; }
+        else if (e.KeyCode is Keys.Up or Keys.Down)
+        {
+            int dir = e.KeyCode == Keys.Up ? -1 : 1;
+            for (int i = _sel + dir; i >= 0 && i < _items.Length; i += dir) if (!_disabled[i]) { Selected = i; break; }
+            e.Handled = true;
+        }
+        base.OnKeyDown(e);
+    }
+
+    private void Open()
+    {
+        if (_menu != null || _items.Length == 0) return;
+        _menu = new PopupMenu();
+        for (int i = 0; i < _items.Length; i++)
+        {
+            int idx = i;
+            _menu.Add(_items[i], "", () => Selected = idx, !_disabled[i], i == _sel);
+        }
+        _menu.FormClosed += (_, _) => { _menu = null; MenuClosed?.Invoke(this, EventArgs.Empty); };
+        var p = PointToScreen(new Point(0, Height + (int)(2 * S)));
+        _menu.ShowAt(p, above: false, owner: FindForm());
+    }
+
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        var g = Prep(e);
+        float s = S, rad = 4 * s;
+        var r = new RectangleF(0.5f, 0.5f, Width - 1.5f, Height - 1.5f);
+        Theme.FillRound(g, Hover && Enabled ? T.ControlHover : T.Control, r, rad);
+        Theme.StrokeRound(g, T.ControlBorder, r, rad, 1f);
+        using (var p = new Pen(T.ControlBottom, 1f)) g.DrawLine(p, r.X + rad, r.Bottom, r.Right - rad, r.Bottom);
+        var flags = TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine | TextFormatFlags.NoPadding;
+        string text = _sel >= 0 && _sel < _items.Length ? _items[_sel] : "";
+        TextRenderer.DrawText(g, text, Fonts.Get(Theme.TextFont, 14 * s), new Rectangle((int)(12 * s), 0, Width - (int)(40 * s), Height),
+            Enabled ? T.Text : T.TextDisabled, flags | TextFormatFlags.EndEllipsis);
+        TextRenderer.DrawText(g, "\uE70D", Fonts.Get(Theme.IconFont, 10 * s), new Rectangle(Width - (int)(28 * s), 0, (int)(18 * s), Height),
+            T.TextDim, flags | TextFormatFlags.HorizontalCenter);
+        DrawFocus(g, r, rad);
+    }
+}
+
+/// <summary>Brand art: lockup / raster mark (tinted mask with hard shadow) or the vector monitor icon.</summary>
+internal sealed class BrandView : FlatControl
+{
+    public enum Kind { Lockup, MarkRaster, MarkVector }
+    public Kind Art { get; set; }
+    public float Shadow { get; set; }
+    public Color? Fore { get; set; }
+    public float Stroke { get; set; } = 1.9f;
+    public BrandView() { TabStop = false; SetStyle(ControlStyles.Selectable, false); }
+
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        var g = Prep(e);
+        var c = Fore ?? T.Text;
+        float sh = Shadow * S;
+        var box = new RectangleF(0, 0, Width - sh, Height - sh);
+        switch (Art)
+        {
+            case Kind.Lockup: Brand.DrawMask(g, Brand.Lockup, box, c, sh); break;
+            case Kind.MarkRaster: Brand.DrawMask(g, Brand.MarkRaster, box, c, sh); break;
+            default: Brand.DrawMark(g, new RectangleF(0, 0, Width, Height), c, Stroke); break;
+        }
     }
 }

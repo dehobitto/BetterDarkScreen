@@ -10,6 +10,7 @@ internal abstract class PopupForm : Form
     private const int WM_NCCALCSIZE = 0x0083;
     private const int WM_NCHITTEST = 0x0084;
     private const int HTCLIENT = 1;
+    private const int WM_NCACTIVATE = 0x0086;
 
     protected PopupForm()
     {
@@ -39,6 +40,9 @@ internal abstract class PopupForm : Form
         {
             if (m.Msg == WM_NCCALCSIZE && m.WParam != IntPtr.Zero) { m.Result = IntPtr.Zero; return; } // no frame
             if (m.Msg == WM_NCHITTEST) { m.Result = HTCLIENT; return; }                                  // no resizing
+            // On deactivate (e.g. when one of our menus opens) DefWindowProc repaints the caption
+            // over the client area. lParam = -1 tells it not to repaint the non-client area.
+            if (m.Msg == WM_NCACTIVATE) { m.LParam = new IntPtr(-1); }
         }
         base.WndProc(ref m);
     }

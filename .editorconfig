@@ -1,0 +1,28 @@
+root = true
+
+[*]
+charset = utf-8
+indent_style = space
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+[*.{csproj,props,targets,xml,manifest,yml,yaml,json}]
+indent_size = 2
+
+[*.cs]
+indent_size = 4
+
+# Keep the compact one-line style used in this code base.
+csharp_preserve_single_line_statements = true
+csharp_preserve_single_line_blocks = true
+
+# Basics the linter enforces (dotnet format + build).
+csharp_style_namespace_declarations = file_scoped:warning
+dotnet_sort_system_directives_first = true
+dotnet_style_readonly_field = true:warning
+csharp_style_var_for_built_in_types = true:silent
+dotnet_diagnostic.IDE0005.severity = warning   # unused usings
+dotnet_diagnostic.IDE0161.severity = warning   # file-scoped namespace
+dotnet_diagnostic.IDE0044.severity = warning   # make field readonly
+csharp_new_line_before_members_in_object_initializers = false
+csharp_new_line_before_members_in_anonymous_types = false

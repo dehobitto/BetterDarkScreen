@@ -1,5 +1,3 @@
-using System.Drawing;
-
 namespace BetterDarkScreen.Ui;
 
 /// <summary>Quick panel shown on tray click (like Win11 quick settings). Created on demand, disposed on close.</summary>
@@ -11,11 +9,14 @@ internal sealed class FlyoutForm : PopupForm
         public required Card Card;
         public required FlatSlider Slider;
         public required Label2 Pct;
-        public required Label2 Tag;
+        public required Chip Tag;
+        public required Label2 Name;
         public required Label2 WarnIcon;
         public required Label2 Warn;
         public bool WarnShown;
     }
+
+    private static readonly string[] ModeItems = { "Auto", "Overlay", "Gamma", "Hardware", "Per monitor" };
 
     private readonly Settings _s;
     private readonly DimController _dim;
@@ -23,9 +24,10 @@ internal sealed class FlyoutForm : PopupForm
     private readonly Action<string?> _openSettings; // focus key, e.g. "unlock"
     private readonly List<Row> _rows = new();
     private Label2 _status = null!, _modeLbl = null!;
+    private Chip _stateChip = null!;
     private ToggleSwitch _master = null!;
     private FlatButton _pause = null!;
-    private Segmented _mode = null!;
+    private DropDown _mode = null!;
     private Panel _footer = null!;
     private bool _anchorTop;
     private int _edgeY;
@@ -35,6 +37,7 @@ internal sealed class FlyoutForm : PopupForm
     private int D(float dip) => (int)Math.Round(dip * S);
     private int W => D(380);
     private int Pad => D(16);
+    private int CardX => D(12);
 
     public FlyoutForm(Settings s, DimController dim, Action changed, Action<string?> openSettings)
     {
@@ -74,55 +77,62 @@ internal sealed class FlyoutForm : PopupForm
         _rows.Clear();
 
         var t = Theme.Current;
-        BackColor = t.Bg;
-        int inner = W - Pad * 2;
+        BackColor = t.Flyout;
 
-        // Header
-        var icon = new Label2 { Text = "\uE708", Family = Theme.IconFont, Px = 16, Color = t.Accent, BackColor = t.Bg };
-        icon.SetBounds(Pad, Pad, D(22), D(28));
-        var title = new Label2 { Text = "BetterDarkScreen", Px = 15, Style = FontStyle.Bold, Family = Theme.DisplayFont, BackColor = t.Bg };
-        title.SetBounds(Pad + D(28), Pad, inner - D(90), D(28));
-        _master = new ToggleSwitch { BackColor = t.Bg, Checked = _s.Enabled, AccessibleName = "Dimming on/off" };
-        _master.SetBounds(W - Pad - D(48), Pad, D(48), D(28));
+        // Header: mark · name · master switch, then state chip + schedule text.
+        var mark = new BrandView { Art = BrandView.Kind.MarkVector, BackColor = t.Flyout, Stroke = 1.9f };
+        mark.SetBounds(Pad, Pad, D(20), D(20));
+        var title = new Label2 { Text = "BetterDarkScreen", Px = 14, Style = FontStyle.Bold, BackColor = t.Flyout };
+        title.SetBounds(Pad + D(30), Pad, W - Pad * 2 - D(80), D(20));
+        _master = new ToggleSwitch { BackColor = t.Flyout, Checked = _s.Enabled, AccessibleName = "Dimming on/off" };
+        _master.SetBounds(W - Pad - D(42), Pad, D(42), D(20));
         _master.CheckedChanged += (_, _) => { _s.Enabled = _master.Checked; if (_s.Enabled) _dim.Resume(); _dim.Refresh(); _changed(); };
-        _status = new Label2 { Px = 12, Color = t.TextDim, BackColor = t.Bg };
-        _status.SetBounds(Pad, Pad + D(30), inner, D(18));
-        Controls.AddRange(new Control[] { icon, title, _master, _status });
+        _stateChip = new Chip { BackColor = t.Flyout, Fore = t.Text };
+        _stateChip.SetBounds(Pad + D(30), Pad + D(26), D(60), D(18));
+        _status = new Label2 { Px = 12, Color = t.TextDim, BackColor = t.Flyout };
+        _status.SetBounds(Pad + D(100), Pad + D(26), W - Pad * 2 - D(100), D(18));
+        Controls.AddRange(new Control[] { mark, title, _master, _stateChip, _status });
 
         // Displays
-        var displays = _dim.Displays;
-        foreach (var d in displays)
+        int inner = W - CardX * 2;
+        foreach (var d in _dim.Displays)
         {
             var ms = _s.For(d.Id);
-            var card = new Card();
+            var card = new Card { Fill = t.FlyoutCard, Border = t.FlyoutCardBorder, BackColor = t.Flyout };
             card.Width = inner;
-            int cp = D(14), cw = inner - cp * 2;
+            var bg = t.FlyoutCard;
+            int cp = D(14);
 
-            var glyph = new Label2 { Text = "\uE7F4", Family = Theme.IconFont, Px = 14, Color = t.TextDim, BackColor = t.Card };
-            glyph.SetBounds(cp, D(12), D(20), D(24));
-            var name = new Label2 { Text = d.Label, Px = 13, Style = FontStyle.Bold, BackColor = t.Card };
-            name.SetBounds(cp + D(26), D(12), cw - D(200), D(24));
-            var tag = new Label2 { Px = 12, Color = t.TextDim, BackColor = t.Card, Flags = TextFormatFlags.Right | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding | TextFormatFlags.EndEllipsis };
-            tag.SetBounds(inner - cp - D(56) - D(110), D(12), D(110), D(24));
-            var tog = new ToggleSwitch { Checked = ms.Enabled, BackColor = t.Card, AccessibleName = $"Dim {d.Label}" };
-            tog.SetBounds(inner - cp - D(48), D(12), D(48), D(24));
+            var glyph = new Label2 { Text = "\uE7F4", Family = Theme.IconFont, Px = 16, Color = t.TextDim, BackColor = bg };
+            glyph.SetBounds(cp, D(12), D(16), D(20));
+            var nameFont = Fonts.Get(Theme.TextFont, 14 * S, FontStyle.Bold);
+            int nameW = Math.Min(TextRenderer.MeasureText(d.Label, nameFont).Width, inner - D(220));
+            var name = new Label2 { Text = d.Label, Px = 14, Style = FontStyle.Bold, BackColor = bg };
+            name.SetBounds(cp + D(26), D(12), nameW, D(20));
+            var tag = new Chip { BackColor = bg };
+            tag.SetBounds(cp + D(26) + nameW + D(10), D(13), D(80), D(18));
+            var tog = new ToggleSwitch { Checked = ms.Enabled, BackColor = bg, AccessibleName = $"Dim {d.Label}" };
+            tog.SetBounds(inner - cp - D(42), D(12), D(42), D(20));
 
-            var sun = new Label2 { Text = "\uE706", Family = Theme.IconFont, Px = 14, Color = t.TextDim, BackColor = t.Card };
-            sun.SetBounds(cp, D(50), D(20), D(28));
-            var slider = new FlatSlider { Minimum = 0, Maximum = 95, LargeChange = 10, BackColor = t.Card, AccessibleName = $"Dim level {d.Label}" };
+            var sun = new Label2 { Text = "\uE706", Family = Theme.IconFont, Px = 16, Color = t.TextDim, BackColor = bg };
+            sun.SetBounds(cp, D(42), D(16), D(20));
+            var slider = new FlatSlider { Minimum = 0, Maximum = 95, LargeChange = 10, BackColor = bg, AccessibleName = $"Dim level {d.Label}" };
             slider.SetSilently(ms.Level);
-            slider.SetBounds(cp + D(20), D(50), cw - D(70), D(28));
-            var pct = new Label2 { Text = $"{ms.Level}%", Px = 13, BackColor = t.Card, Flags = TextFormatFlags.Right | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding };
-            pct.SetBounds(inner - cp - D(44), D(50), D(44), D(28));
+            slider.SetBounds(cp + D(28), D(42), inner - cp * 2 - D(28) - D(52), D(20));
+            var pct = new Label2 { Text = $"{ms.Level}%", Px = 14, BackColor = bg, Flags = TextFormatFlags.Right | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding };
+            pct.SetBounds(inner - cp - D(40), D(42), D(40), D(20));
 
-            var warnIcon = new Label2 { Text = "\uE7BA", Family = Theme.IconFont, Px = 13, Color = t.Warning, BackColor = t.Card, Visible = false };
-            warnIcon.SetBounds(cp, D(84), D(20), D(22));
-            var warn = new Label2 { Px = 12, Color = t.Warning, BackColor = t.Card, Link = true, Visible = false,
-                Text = "Gamma stops near 50%. Unlock deeper gamma in Settings" };
-            warn.SetBounds(cp + D(24), D(84), cw - D(24), D(22));
+            var warnIcon = new Label2 { Text = "\uE7BA", Family = Theme.IconFont, Px = 13, Color = t.Warning, BackColor = bg, Visible = false };
+            warnIcon.SetBounds(cp, D(70), D(20), D(20));
+            var warn = new Label2
+            {
+                Px = 12, Color = t.Warning, BackColor = bg, Link = true, Visible = false,
+                Text = "Gamma stops near 50%. Unlock deeper gamma in Settings"
+            };
+            warn.SetBounds(cp + D(24), D(70), inner - cp * 2 - D(24), D(20));
             warn.Click += (_, _) => { Close(); _openSettings("unlock"); };
 
-            var row = new Row { Id = d.Id, Card = card, Slider = slider, Pct = pct, Tag = tag, WarnIcon = warnIcon, Warn = warn };
+            var row = new Row { Id = d.Id, Card = card, Slider = slider, Pct = pct, Tag = tag, Name = name, WarnIcon = warnIcon, Warn = warn };
             string id = d.Id;
             slider.ValueChanged += (_, _) =>
             {
@@ -149,21 +159,23 @@ internal sealed class FlyoutForm : PopupForm
         }
 
         // Method
-        _modeLbl = new Label2 { Text = "Method", Px = 12, Color = t.TextDim, BackColor = t.Bg };
-        _mode = new Segmented { Items = new[] { "Auto", "Overlay", "Gamma", "Hardware", "Custom" }, BackColor = t.Bg, AccessibleName = "Dimming method" };
+        _modeLbl = new Label2 { Text = "Method", Px = 14, BackColor = t.Flyout };
+        _mode = new DropDown { Items = ModeItems, BackColor = t.Flyout, AccessibleName = "Dimming method" };
         _mode.SetSilently((int)_s.Mode);
         _mode.SelectedChanged += (_, _) => { _s.Mode = (DimMode)_mode.Selected; _dim.Refresh(); _changed(); UpdateAll(); };
+        _mode.MenuClosed += (_, _) => BeginInvoke(() => { if (!IsDisposed && Form.ActiveForm != this) Close(); });
         Controls.AddRange(new Control[] { _modeLbl, _mode });
 
         // Footer
-        _footer = new Panel { BackColor = t.Footer };
+        _footer = new Panel { BackColor = t.Bg };
         var divider = new Panel { BackColor = t.Divider };
         divider.SetBounds(0, 0, W, 1);
-        _pause = new FlatButton { BackColor = t.Footer, Glyph = "\uE769", Text = "Pause" };
-        _pause.SetBounds(Pad, D(10), D(120), D(32));
+        _pause = new FlatButton { BackColor = t.Bg, Glyph = "\uE769", Text = "Pause for 1 hour" };
+        _pause.SetBounds(Pad, D(12), _pause.PreferredWidth(), D(32));
+        _pause.MouseUp += (_, e) => { if (e.Button == MouseButtons.Right) ShowPauseMenu(); };
         _pause.Click += (_, _) => OnPauseClick();
-        var gear = new FlatButton { BackColor = t.Footer, Glyph = "\uE713", Subtle = true, AccessibleName = "Settings" };
-        gear.SetBounds(W - Pad - D(36), D(10), D(36), D(32));
+        var gear = new FlatButton { BackColor = t.Bg, Glyph = "\uE713", Subtle = true, AccessibleName = "Open settings" };
+        gear.SetBounds(W - Pad - D(36), D(12), D(36), D(32));
         gear.Click += (_, _) => { Close(); _openSettings(null); };
         _footer.Controls.AddRange(new Control[] { divider, _pause, gear });
         Controls.Add(_footer);
@@ -176,20 +188,20 @@ internal sealed class FlyoutForm : PopupForm
     private void Relayout()
     {
         SuspendLayout();
-        int inner = W - Pad * 2;
-        int y = Pad + D(58);
+        int inner = W - CardX * 2;
+        int y = Pad + D(26) + D(18) + D(12);
         foreach (var r in _rows)
         {
-            int h = D(r.WarnShown ? 114 : 92);
-            r.Card.SetBounds(Pad, y, inner, h);
+            int h = D(r.WarnShown ? 102 : 76);
+            r.Card.SetBounds(CardX, y, inner, h);
             r.Warn.Visible = r.WarnIcon.Visible = r.WarnShown;
-            y += h + D(8);
+            y += h + D(4);
         }
-        y += D(4);
-        _modeLbl.SetBounds(Pad, y, D(60), D(32));
-        _mode.SetBounds(Pad + D(58), y, inner - D(58), D(32));
-        y += D(32) + Pad;
-        int fh = D(52);
+        y += D(10);
+        _modeLbl.SetBounds(Pad, y, D(120), D(32));
+        _mode.SetBounds(W - Pad - D(168), y, D(168), D(32));
+        y += D(32) + D(14);
+        int fh = D(56);
         _footer.SetBounds(0, y, W, fh);
         int height = y + fh;
         var top = _anchorTop ? _edgeY : _edgeY - height;
@@ -235,7 +247,15 @@ internal sealed class FlyoutForm : PopupForm
 
     private void OnPauseClick()
     {
-        if (_dim.IsPaused) { _dim.Resume(); UpdateStatus(); return; }
+        if (_dim.IsPaused) _dim.Resume();
+        else _dim.Pause(TimeSpan.FromHours(1));
+        UpdateStatus();
+    }
+
+    /// <summary>Right-click on Pause: other durations.</summary>
+    private void ShowPauseMenu()
+    {
+        if (_menu != null || !_s.Enabled) return;
         _menu = new PopupMenu()
             .Add("For 15 minutes", "\uE916", () => Pause(TimeSpan.FromMinutes(15)))
             .Add("For 1 hour", "\uE823", () => Pause(TimeSpan.FromHours(1)))
@@ -265,24 +285,32 @@ internal sealed class FlyoutForm : PopupForm
     private void UpdateStatus()
     {
         if (_status == null) return;
-        string text;
-        if (!_s.Enabled) text = "Off";
+        string chip, text;
+        if (!_s.Enabled) { chip = "Off"; text = "Dimming is turned off"; }
         else if (_dim.IsPaused)
-            text = _dim.PausedUntil == DateTime.MaxValue ? "Paused" : $"Paused until {_dim.PausedUntil:HH:mm}";
+        {
+            chip = "Paused";
+            text = _dim.PausedUntil == DateTime.MaxValue ? "Until you resume" : $"Until {_dim.PausedUntil:HH:mm}";
+        }
         else
         {
             double f = _dim.ScheduleFactor;
-            string state = f <= 0 ? "Waiting" : f < 1 ? $"Fading {f:P0}" : "Active";
-            text = _s.Schedule == ScheduleKind.Always ? "Active" : $"{state}  ·  {Schedule.Describe(_s, DateTime.Now)}";
-            if (_dim.FullscreenGame && _s.Mode is DimMode.Auto or DimMode.Custom) text += "  ·  game detected";
+            chip = _s.Schedule == ScheduleKind.Always ? "Active" : f <= 0 ? "Waiting" : f < 1 ? $"Fading {f:P0}" : "Active";
+            text = Schedule.DescribeShort(_s, DateTime.Now);
+            if (_dim.FullscreenGame && _s.Mode is DimMode.Auto or DimMode.Custom) text += " · game detected";
         }
+        _stateChip.Text = chip;
+        _status.Left = _stateChip.Right + D(8);
+        _status.Width = W - Pad - _status.Left;
         _status.Text = text;
+        if (_mode != null && _mode.Selected != (int)_s.Mode) _mode.SetSilently((int)_s.Mode);
         if (_pause != null)
         {
             bool p = _dim.IsPaused;
-            _pause.Text = p ? "Resume" : "Pause";
+            _pause.Text = p ? "Resume" : "Pause for 1 hour";
             _pause.Glyph = p ? "\uE768" : "\uE769";
             _pause.Enabled = _s.Enabled;
+            _pause.Width = _pause.PreferredWidth();
             _pause.Invalidate();
         }
     }
@@ -294,7 +322,7 @@ internal sealed class FlyoutForm : PopupForm
         base.OnDeactivate(e);
         BeginInvoke(() =>
         {
-            if (IsDisposed || _menu != null) return; // our pause menu took focus
+            if (IsDisposed || _menu != null || (_mode != null && _mode.MenuOpen)) return; // our own menu took focus
             if (!ContainsFocus && Form.ActiveForm != this) Close();
         });
     }

@@ -79,7 +79,7 @@ You need the [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0) (**S
 ```powershell
 git clone <this repo>
 cd BetterDarkScreen
-.\build.ps1              # -> publish\BetterDarkScreen.exe  (self-contained, single file)
+.\build.ps1              # -> publish\BetterDarkScreen-<version>.exe  (self-contained, single file)
 .\build.ps1 -Small       # compressed exe: ~3x smaller file, slightly more RAM
 dotnet run --project src # debug run
 ```

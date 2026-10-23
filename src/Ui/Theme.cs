@@ -1,4 +1,3 @@
-using System.Drawing;
 using System.Drawing.Drawing2D;
 using Microsoft.Win32;
 
@@ -27,10 +26,32 @@ internal sealed class Theme
     public Color MenuHover { get; private init; }
     public Color Selected { get; private init; }
     public Color Warning { get; private init; }
+    // Redesign tokens
+    public Color TextTertiary { get; private init; }
+    public Color ControlBottom { get; private init; }
+    public Color Flyout { get; private init; }
+    public Color FlyoutBorder { get; private init; }
+    public Color FlyoutCard { get; private init; }
+    public Color FlyoutCardBorder { get; private init; }
+    public Color SegTrack { get; private init; }
+    public Color SegBorder { get; private init; }
+    public Color SegSelected { get; private init; }
+    public Color NavSelected { get; private init; }
+    public Color SliderTrack { get; private init; }
+    public Color Thumb { get; private init; }
+    public Color ThumbBorder { get; private init; }
+    public Color Chip { get; private init; }
+    public Color Keycap { get; private init; }
+    public Color KeycapEdge { get; private init; }
+    public Color Note { get; private init; }
+    public Color Dashed { get; private init; }
 
-    public static string TextFont { get; } = Pick("Segoe UI Variable Text", "Segoe UI");
-    public static string DisplayFont { get; } = Pick("Segoe UI Variable Display", "Segoe UI");
+    // GDI (TextRenderer) draws the variable "Segoe UI Variable" font with poor hinting at small sizes,
+    // so stick to classic Segoe UI, which is hinted for GDI and looks crisp.
+    public static string TextFont { get; } = Pick("Segoe UI", "Tahoma");
+    public static string DisplayFont { get; } = Pick("Segoe UI", "Tahoma");
     public static string IconFont { get; } = Pick("Segoe Fluent Icons", "Segoe MDL2 Assets");
+    public static string MonoFont { get; } = Pick("Cascadia Mono", "Consolas");
 
     private static Theme? _cur;
     public static Theme Current => _cur ??= Load();
@@ -52,6 +73,11 @@ internal sealed class Theme
                 Accent = accent, AccentHover = Blend(accent, Color.Black, 0.1), OnAccent = onAccent,
                 Divider = Hex(0x3A3A3A), Track = Hex(0x9A9A9A),
                 Menu = Hex(0x2C2C2C), MenuHover = Hex(0x3A3A3A), Selected = Hex(0x4A4A4A), Warning = Hex(0xFCE100),
+                TextTertiary = Hex(0x9D9D9D), ControlBottom = Hex(0x5A5A5A),
+                Flyout = Hex(0x2C2C2C), FlyoutBorder = Hex(0x3C3C3C), FlyoutCard = Hex(0x333333), FlyoutCardBorder = Hex(0x3A3A3A),
+                SegTrack = Hex(0x1C1C1C), SegBorder = Hex(0x383838), SegSelected = Hex(0x3A3A3A), NavSelected = Hex(0x2D2D2D),
+                SliderTrack = Hex(0x5C5C5C), Thumb = Hex(0x454545), ThumbBorder = Hex(0x575757),
+                Chip = Hex(0x3D3D3D), Keycap = Hex(0x4A4A4A), KeycapEdge = Hex(0x1F1F1F), Note = Hex(0x272727), Dashed = Hex(0x5C5C5C),
             }
             : new Theme
             {
@@ -62,6 +88,11 @@ internal sealed class Theme
                 Accent = accent, AccentHover = Blend(accent, Color.White, 0.1), OnAccent = onAccent,
                 Divider = Hex(0xE5E5E5), Track = Hex(0x8A8A8A),
                 Menu = Hex(0xF9F9F9), MenuHover = Hex(0xEAEAEA), Selected = Hex(0xFFFFFF), Warning = Hex(0x9D5D00),
+                TextTertiary = Hex(0x707070), ControlBottom = Hex(0xBDBDBD),
+                Flyout = Hex(0xEEEEEE), FlyoutBorder = Hex(0xD8D8D8), FlyoutCard = Hex(0xFBFBFB), FlyoutCardBorder = Hex(0xE3E3E3),
+                SegTrack = Hex(0xEDEDED), SegBorder = Hex(0xD9D9D9), SegSelected = Hex(0xFFFFFF), NavSelected = Hex(0xEAEAEA),
+                SliderTrack = Hex(0xC2C2C2), Thumb = Hex(0xFFFFFF), ThumbBorder = Hex(0xD0D0D0),
+                Chip = Hex(0xE6E6E6), Keycap = Hex(0xFFFFFF), KeycapEdge = Hex(0xCFCFCF), Note = Hex(0xF7F7F7), Dashed = Hex(0xA8A8A8),
             };
     }
 
@@ -140,6 +171,19 @@ internal sealed class Theme
         g.FillPath(b, path);
     }
 
+    /// <summary>Rounded rect with separate top / bottom radius (grouped cards).</summary>
+    public static GraphicsPath RoundRect(RectangleF r, float top, float bottom)
+    {
+        var p = new GraphicsPath();
+        float dt = Math.Min(top * 2, Math.Min(r.Width, r.Height)), db = Math.Min(bottom * 2, Math.Min(r.Width, r.Height));
+        if (dt > 0.5f) { p.AddArc(r.X, r.Y, dt, dt, 180, 90); p.AddArc(r.Right - dt, r.Y, dt, dt, 270, 90); }
+        else { p.AddLine(r.X, r.Y, r.Right, r.Y); }
+        if (db > 0.5f) { p.AddArc(r.Right - db, r.Bottom - db, db, db, 0, 90); p.AddArc(r.X, r.Bottom - db, db, db, 90, 90); }
+        else { p.AddLine(r.Right, r.Bottom, r.X, r.Bottom); }
+        p.CloseFigure();
+        return p;
+    }
+
     public static void StrokeRound(Graphics g, Color c, RectangleF r, float radius, float width = 1f)
     {
         using var path = RoundRect(r, radius);
@@ -151,7 +195,7 @@ internal sealed class Theme
     public static void ApplyPopupChrome(IntPtr hwnd, Theme t)
     {
         ApplyWindowChrome(hwnd, t.Dark, true);
-        int border = t.Dark ? 0x00404040 : 0x00D8D8D8; // COLORREF 0x00BBGGRR (grey: same either way)
+        int border = (t.FlyoutBorder.B << 16) | (t.FlyoutBorder.G << 8) | t.FlyoutBorder.R; // COLORREF 0x00BBGGRR (grey: same either way)
         Native.DwmSetWindowAttribute(hwnd, Native.DWMWA_BORDER_COLOR, ref border, 4);
     }
 

@@ -20,27 +20,27 @@ internal static class Schedule
         switch (s.Schedule)
         {
             case ScheduleKind.Fixed:
-            {
-                if (!TryParseTime(s.FixedStart, out var a) || !TryParseTime(s.FixedEnd, out var b)) return null;
-                var start = day + a;
-                var end = day + b;
-                if (end <= start) end = end.AddDays(1);
-                return (start, end);
-            }
-            case ScheduleKind.Sun:
-            {
-                var set = SunCalc.Sunset(day, s.Latitude, s.Longitude);
-                var rise = SunCalc.Sunrise(day.AddDays(1), s.Latitude, s.Longitude);
-                if (set is null || rise is null)
                 {
-                    // Polar day/night: dim whole day if sun never rises.
-                    return SunCalc.IsPolarNight(day, s.Latitude) ? (day, day.AddDays(1)) : null;
+                    if (!TryParseTime(s.FixedStart, out var a) || !TryParseTime(s.FixedEnd, out var b)) return null;
+                    var start = day + a;
+                    var end = day + b;
+                    if (end <= start) end = end.AddDays(1);
+                    return (start, end);
                 }
-                var start = set.Value.AddMinutes(s.SunsetOffsetMin);
-                var end = rise.Value.AddMinutes(s.SunriseOffsetMin);
-                if (end <= start) return null;
-                return (start, end);
-            }
+            case ScheduleKind.Sun:
+                {
+                    var set = SunCalc.Sunset(day, s.Latitude, s.Longitude);
+                    var rise = SunCalc.Sunrise(day.AddDays(1), s.Latitude, s.Longitude);
+                    if (set is null || rise is null)
+                    {
+                        // Polar day/night: dim whole day if sun never rises.
+                        return SunCalc.IsPolarNight(day, s.Latitude) ? (day, day.AddDays(1)) : null;
+                    }
+                    var start = set.Value.AddMinutes(s.SunsetOffsetMin);
+                    var end = rise.Value.AddMinutes(s.SunriseOffsetMin);
+                    if (end <= start) return null;
+                    return (start, end);
+                }
             default:
                 return null;
         }
@@ -83,6 +83,17 @@ internal static class Schedule
         var (a, b) = cur.Value;
         string prefix = s.Schedule == ScheduleKind.Sun ? "Sunset" : "Scheduled";
         return $"{prefix} {a:HH:mm} – {b:HH:mm}";
+    }
+
+    /// <summary>Quick panel wording: "Dims at 22:00, until 09:00" or "Until 09:00" while active.</summary>
+    public static string DescribeShort(Settings s, DateTime now)
+    {
+        if (s.Schedule == ScheduleKind.Always) return "Always on";
+        var cur = Window(s, now.AddDays(-1)) is { } y && now < y.end ? y : Window(s, now);
+        if (cur is null) return s.Schedule == ScheduleKind.Sun ? "No sunset today" : "Invalid time";
+        var (a, b) = cur.Value;
+        string at = s.Schedule == ScheduleKind.Sun ? $"sunset, {a:HH:mm}" : $"{a:HH:mm}";
+        return now >= a && now < b ? $"Until {b:HH:mm}" : $"Dims at {at}, until {b:HH:mm}";
     }
 }
 

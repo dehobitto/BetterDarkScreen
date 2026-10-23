@@ -41,6 +41,11 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <EmbeddedResource Include="Assets\lockup.png" LogicalName="BetterDarkScreen.Assets.lockup.png" />
+    <EmbeddedResource Include="Assets\mark.png" LogicalName="BetterDarkScreen.Assets.mark.png" />
+  </ItemGroup>
+
+  <ItemGroup>
     <RuntimeHostConfigurationOption Include="System.GC.RetainVM" Value="false" />
     <RuntimeHostConfigurationOption Include="System.GC.ConserveMemory" Value="7" />
   </ItemGroup>

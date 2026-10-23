@@ -51,7 +51,9 @@ internal sealed class TrayApp : ApplicationContext
         else _trim.Start();
     }
 
-    /// <summary>Another instance was launched: show the panel.</summary>
+    /// <summary>
+    /// Another instance was launched: show the panel.
+    /// </summary>
     public void Activate() => ShowFlyout();
 
     private void Changed()
@@ -145,12 +147,12 @@ internal sealed class TrayApp : ApplicationContext
 
     private void UpdateIcon()
     {
-        var st = !_s.Enabled || _dim.IsPaused ? TrayIcons.State.Off
-               : _dim.ScheduleFactor > 0 ? TrayIcons.State.Active : TrayIcons.State.Idle;
+        var st = !_s.Enabled ? TrayIcons.State.Off
+               : !_dim.IsPaused && _dim.ScheduleFactor > 0 ? TrayIcons.State.Active : TrayIcons.State.Idle;
         string tip = st switch
         {
-            TrayIcons.State.Off => _dim.IsPaused ? "BetterDarkScreen · paused" : "BetterDarkScreen · off",
-            TrayIcons.State.Idle => "BetterDarkScreen · waiting for schedule",
+            TrayIcons.State.Off => "BetterDarkScreen · off",
+            TrayIcons.State.Idle => _dim.IsPaused ? "BetterDarkScreen · paused" : "BetterDarkScreen · waiting for schedule",
             _ => "BetterDarkScreen · dimming",
         };
         if (_tray.Text != tip) _tray.Text = tip;
