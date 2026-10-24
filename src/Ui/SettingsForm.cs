@@ -23,6 +23,9 @@ internal sealed class SettingsForm : Form
     private int _y;
     private List<Card>? _group;
     private Icon? _icon;
+    private Color _iconColor;
+    // Pages are rebuilt inside this panel; the form and its title bar are never touched.
+    private readonly Panel _root = new() { Location = Point.Empty };
 
     private float S => DeviceDpi / 96f;
     private int D(float dip) => (int)Math.Round(dip * S);
@@ -43,6 +46,7 @@ internal sealed class SettingsForm : Form
         StartPosition = FormStartPosition.CenterScreen;
         AutoScaleMode = AutoScaleMode.None;
         KeyPreview = true;
+        Controls.Add(_root);
         _dim.StateChanged += OnDimState;
     }
 
@@ -114,36 +118,46 @@ internal sealed class SettingsForm : Form
 
     private void Build()
     {
-        // Freeze painting so the old page doesn't vanish before the new one is ready.
-        bool freeze = IsHandleCreated && Visible;
-        if (freeze) Native.SendMessage(Handle, Native.WM_SETREDRAW, IntPtr.Zero, IntPtr.Zero);
-        try { BuildCore(); }
+        // Keep keyboard focus on the form while the old controls are destroyed. If the focused
+        // control is disposed, Windows briefly drops focus and the title bar flashes inactive.
+        var focusName = ActiveControl?.AccessibleName;
+        if (IsHandleCreated) { ActiveControl = null; Focus(); }
+
+        // Freeze painting of the page area only (not the window frame) until the new page is ready.
+        bool freeze = _root.IsHandleCreated && Visible;
+        if (freeze) Native.SendMessage(_root.Handle, Native.WM_SETREDRAW, IntPtr.Zero, IntPtr.Zero);
+        try { BuildCore(focusName); }
         finally
         {
             if (freeze)
             {
-                Native.SendMessage(Handle, Native.WM_SETREDRAW, new IntPtr(1), IntPtr.Zero);
-                Native.RedrawWindow(Handle, IntPtr.Zero, IntPtr.Zero,
-                    Native.RDW_ERASE | Native.RDW_FRAME | Native.RDW_INVALIDATE | Native.RDW_ALLCHILDREN | Native.RDW_UPDATENOW);
+                Native.SendMessage(_root.Handle, Native.WM_SETREDRAW, new IntPtr(1), IntPtr.Zero);
+                Native.RedrawWindow(_root.Handle, IntPtr.Zero, IntPtr.Zero,
+                    Native.RDW_ERASE | Native.RDW_INVALIDATE | Native.RDW_ALLCHILDREN | Native.RDW_UPDATENOW);
             }
         }
     }
 
-    private void BuildCore()
+    private void BuildCore(string? focusName)
     {
         SuspendLayout();
-        var focusName = ActiveControl?.AccessibleName;
-        var old = Controls.Cast<Control>().ToList();
-        Controls.Clear();
+        _root.SuspendLayout();
+        var old = _root.Controls.Cast<Control>().ToList();
+        _root.Controls.Clear();
         foreach (var c in old) c.Dispose();
         var t = Theme.Current;
-        BackColor = t.Bg;
+        BackColor = _root.BackColor = t.Bg;
 
-        // Title bar icon: monochrome monitor mark.
-        var oldIcon = _icon;
-        _icon = Brand.MarkIcon(SystemInformation.SmallIconSize.Width, t.Text);
-        Icon = _icon;
-        oldIcon?.Dispose();
+        // Title bar icon: monochrome monitor mark. Only replaced when the color changes,
+        // because setting Form.Icon repaints the title bar.
+        if (_icon == null || _iconColor != t.Text)
+        {
+            var oldIcon = _icon;
+            _icon = Brand.MarkIcon(SystemInformation.SmallIconSize.Width, t.Text);
+            _iconColor = t.Text;
+            Icon = _icon;
+            oldIcon?.Dispose();
+        }
 
         // Navigation: lockup, then pages.
         var nav = new Panel { BackColor = t.Bg };
@@ -185,9 +199,12 @@ internal sealed class SettingsForm : Form
         int h = Math.Max(D(688), Math.Max(_y + D(24), ny + D(12)));
         nav.SetBounds(0, 0, NavW, h);
         _content.SetBounds(NavW, 0, ContentW, h);
-        Controls.Add(nav);
-        Controls.Add(_content);
-        ClientSize = new Size(ClientW, h);
+        _root.Controls.Add(nav);
+        _root.Controls.Add(_content);
+        _root.Size = new Size(ClientW, h);
+        _root.ResumeLayout();
+        var size = new Size(ClientW, h);
+        if (ClientSize != size) ClientSize = size; // resizing repaints the frame, so only when needed
         ResumeLayout();
 
         if (focusName != null)
@@ -220,8 +237,8 @@ internal sealed class SettingsForm : Form
             BeginGroup();
             var from = Field(_s.FixedStart, "");
             var to = Field(_s.FixedEnd, "");
-            from.Box.TextChanged += (_, _) => { if (Schedule.TryParseTime(from.Text, out _)) { _s.FixedStart = from.Text.Trim(); Apply(); UpdatePreview(); } };
-            to.Box.TextChanged += (_, _) => { if (Schedule.TryParseTime(to.Text, out _)) { _s.FixedEnd = to.Text.Trim(); Apply(); UpdatePreview(); } };
+            from.TextChanged += (_, _) => { if (Schedule.TryParseTime(from.Text, out _)) { _s.FixedStart = from.Text.Trim(); Apply(); UpdatePreview(); } };
+            to.TextChanged += (_, _) => { if (Schedule.TryParseTime(to.Text, out _)) { _s.FixedEnd = to.Text.Trim(); Apply(); UpdatePreview(); } };
             Row("Start", "24-hour time, e.g. 21:30", from, D(96), D(32));
             Row("End", "Can be after midnight", to, D(96), D(32));
             EndGroup();
@@ -232,8 +249,8 @@ internal sealed class SettingsForm : Form
             BeginGroup();
             var lat = Field(_s.Latitude.ToString("0.####", CultureInfo.InvariantCulture), "°");
             var lon = Field(_s.Longitude.ToString("0.####", CultureInfo.InvariantCulture), "°");
-            lat.Box.TextChanged += (_, _) => { if (TryNum(lat.Text, -90, 90, out var v)) { _s.Latitude = v; Apply(); UpdatePreview(); } };
-            lon.Box.TextChanged += (_, _) => { if (TryNum(lon.Text, -180, 180, out var v)) { _s.Longitude = v; Apply(); UpdatePreview(); } };
+            lat.TextChanged += (_, _) => { if (TryNum(lat.Text, -90, 90, out var v)) { _s.Latitude = v; Apply(); UpdatePreview(); } };
+            lon.TextChanged += (_, _) => { if (TryNum(lon.Text, -180, 180, out var v)) { _s.Longitude = v; Apply(); UpdatePreview(); } };
             Row("Latitude", "North is positive. Kyiv ≈ 50.45", lat, D(110), D(32));
             Row("Longitude", "East is positive. Kyiv ≈ 30.52", lon, D(110), D(32));
             EndGroup();
@@ -242,8 +259,8 @@ internal sealed class SettingsForm : Form
             BeginGroup();
             var so = Field(_s.SunsetOffsetMin.ToString(CultureInfo.InvariantCulture), "min");
             var ro = Field(_s.SunriseOffsetMin.ToString(CultureInfo.InvariantCulture), "min");
-            so.Box.TextChanged += (_, _) => { if (int.TryParse(so.Text, out var v) && Math.Abs(v) <= 300) { _s.SunsetOffsetMin = v; Apply(); UpdatePreview(); } };
-            ro.Box.TextChanged += (_, _) => { if (int.TryParse(ro.Text, out var v) && Math.Abs(v) <= 300) { _s.SunriseOffsetMin = v; Apply(); UpdatePreview(); } };
+            so.TextChanged += (_, _) => { if (int.TryParse(so.Text, out var v) && Math.Abs(v) <= 300) { _s.SunsetOffsetMin = v; Apply(); UpdatePreview(); } };
+            ro.TextChanged += (_, _) => { if (int.TryParse(ro.Text, out var v) && Math.Abs(v) <= 300) { _s.SunriseOffsetMin = v; Apply(); UpdatePreview(); } };
             Row("Sunset offset", "Minutes. Negative starts earlier", so, D(110), D(32));
             Row("Sunrise offset", "Minutes. Negative stops earlier", ro, D(110), D(32));
             EndGroup();
@@ -710,7 +727,7 @@ internal sealed class SettingsForm : Form
     private FieldBox Field(string text, string suffix)
     {
         var f = new FieldBox { Suffix = suffix };
-        f.Box.Text = text;
+        f.Text = text;
         return f;
     }
 

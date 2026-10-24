@@ -26,7 +26,13 @@ internal sealed class HwBrightness : IDisposable
         public bool Slow;                   // debounce + rate limit writes (fragile monitors)
         public long ChangedAt;              // Environment.TickCount64 of the last WantDim change
         public long WroteAt = long.MinValue / 2;
+        public long RetryAt;                // >0: probe again at this TickCount64 (monitor didn't answer)
+        public int ProbeTries;
     }
+
+    /// <summary>Re-probe a monitor that didn't answer after 5 s, 15 s and 30 s (waking up, slow DDC).</summary>
+    private static readonly int[] RetryDelays = { 5000, 10000, 15000 };
+    private long _holdUntil;
 
     /// <summary>Slow mode: wait this long after the last change before writing (slider has stopped).</summary>
     private const int SlowSettleMs = 800;
@@ -74,6 +80,13 @@ internal sealed class HwBrightness : IDisposable
         _wake.Set();
     }
 
+    /// <summary>Don't talk to any monitor for this long (e.g. right after resume, while monitors wake up).</summary>
+    public void HoldOff(int ms)
+    {
+        Interlocked.Exchange(ref _holdUntil, Environment.TickCount64 + ms);
+        _wake.Set();
+    }
+
     private readonly Dictionary<string, bool> _slow = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>Turn slow (debounced, rate-limited) writes on or off for one display.</summary>
@@ -96,9 +109,13 @@ internal sealed class HwBrightness : IDisposable
         while (!_quit)
         {
             _wake.WaitOne(wait);
+            long hold = Interlocked.Read(ref _holdUntil) - Environment.TickCount64;
+            if (hold > 0) { wait = (int)Math.Min(hold, int.MaxValue); continue; } // pending work runs after the hold
+
             List<DisplaySpec>? specs;
             lock (_lock) { specs = _pendingSpecs; _pendingSpecs = null; }
             if (specs != null) Reprobe(specs);
+            RetryProbes();
 
             // Apply until nothing changes (coalesces fast slider moves).
             bool again = true;
@@ -111,13 +128,15 @@ internal sealed class HwBrightness : IDisposable
                     if (Step(d)) { again = true; Thread.Sleep(60); }
             }
 
-            // Slow-mode displays with a pending change: wake up when they are due.
+            // Slow-mode writes and probe retries that are due later: wake up for them.
             wait = Timeout.Infinite;
             List<Dev> all;
             lock (_lock) all = _devs.Values.ToList();
+            long now = Environment.TickCount64;
             foreach (var d in all)
             {
                 int due = SlowDueIn(d);
+                if (d.RetryAt > 0) { int r = (int)Math.Max(0, d.RetryAt - now); due = due < 0 ? r : Math.Min(due, r); }
                 if (due >= 0 && (wait == Timeout.Infinite || due < wait)) wait = Math.Max(due, 20);
             }
         }
@@ -138,11 +157,29 @@ internal sealed class HwBrightness : IDisposable
             else if (sp.SavedDimmed && sp.SavedNormal >= 0) { d.Normal = sp.SavedNormal; d.Dimmed = true; } // crash recovery
 
             d.Supported = Open(d);
+            if (d.Supported != true && !d.Internal) { d.ProbeTries = 0; d.RetryAt = Environment.TickCount64 + RetryDelays[0]; }
             lock (_lock) _devs[d.Id] = d;
             bool sup = d.Supported == true;
             _ui.Post(_ => Probed?.Invoke(sp.Id, sup), null);
         }
         foreach (var o in old.Values) Close(o);
+    }
+
+    /// <summary>Monitors that didn't answer the first probe get a few more chances before Hardware is given up.</summary>
+    private void RetryProbes()
+    {
+        List<Dev> list;
+        lock (_lock) list = _devs.Values.Where(d => d.RetryAt > 0 && Environment.TickCount64 >= d.RetryAt).ToList();
+        foreach (var d in list)
+        {
+            Close(d);
+            bool ok = Open(d);
+            d.Supported = ok;
+            d.ProbeTries++;
+            d.RetryAt = ok || d.ProbeTries >= RetryDelays.Length ? 0 : Environment.TickCount64 + RetryDelays[d.ProbeTries];
+            string id = d.Id;
+            _ui.Post(_ => Probed?.Invoke(id, ok), null);
+        }
     }
 
     private static bool Open(Dev d)

@@ -46,6 +46,9 @@ internal sealed class DimController : IDisposable
     private readonly Native.WinEventDelegate _winEvent;
     private readonly IntPtr _hook;
     private DateTime _lastGammaKick;
+    private DateTime _resumedAt = DateTime.MinValue;
+    /// <summary>After resume, give monitors this long to wake up before probing / writing DDC/CI.</summary>
+    private const int WakeDelayMs = 5000;
     private bool _fullscreen;
     private IntPtr _fullscreenMonitor;
     private bool _gammaUnlocked = GammaRamp.IsRangeUnlocked();
@@ -315,17 +318,29 @@ internal sealed class DimController : IDisposable
         if (wasFs != _fullscreen || wasMon != _fullscreenMonitor) Update(animate: true);
     }
 
-    private void OnDisplayChanged(object? sender, EventArgs e) { _rebuild.Stop(); _rebuild.Start(); }
+    /// <summary>Debounced rebuild; longer right after resume so monitors are awake first.</summary>
+    private void ScheduleRebuild()
+    {
+        bool waking = (DateTime.Now - _resumedAt).TotalSeconds < 20;
+        _rebuild.Stop();
+        _rebuild.Interval = waking ? WakeDelayMs : 700;
+        _rebuild.Start();
+    }
+
+    private void OnDisplayChanged(object? sender, EventArgs e) => ScheduleRebuild();
 
     private void OnPower(object? sender, PowerModeChangedEventArgs e)
     {
-        if (e.Mode == PowerModes.Resume) { _rebuild.Stop(); _rebuild.Start(); }
+        if (e.Mode != PowerModes.Resume) return;
+        _resumedAt = DateTime.Now;
+        _hw.HoldOff(WakeDelayMs); // no DDC/CI traffic while monitors wake up
+        ScheduleRebuild();
     }
 
     private void OnSession(object? sender, SessionSwitchEventArgs e)
     {
         if (e.Reason is SessionSwitchReason.SessionUnlock or SessionSwitchReason.ConsoleConnect or SessionSwitchReason.RemoteConnect)
-        { _rebuild.Stop(); _rebuild.Start(); }
+            ScheduleRebuild();
     }
 
     public void Dispose()

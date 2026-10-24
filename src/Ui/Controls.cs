@@ -1,5 +1,4 @@
 using System.ComponentModel;
-using System.Diagnostics.CodeAnalysis;
 using System.Drawing.Drawing2D;
 
 namespace BetterDarkScreen.Ui;
@@ -560,55 +559,234 @@ internal sealed class Label2 : FlatControl
     }
 }
 
-/// <summary>Rounded text field hosting a borderless TextBox.</summary>
+/// <summary>
+/// Single-line text field drawn by hand (no Win32 EDIT control), so the selection uses the app accent
+/// instead of the system blue. Supports caret, mouse/keyboard selection, clipboard and undo-free editing.
+/// </summary>
 internal sealed class FieldBox : FlatControl
 {
-    public readonly TextBox Box = new() { BorderStyle = BorderStyle.None };
     public string Suffix { get; set; } = "";
+    public int MaxLength { get; set; } = 32;
+
+    private int _caret, _anchor, _scroll;
+    private bool _dragging, _caretOn = true, _mouseFocus;
+    private readonly System.Windows.Forms.Timer _blink = new() { Interval = 530 };
+
+    private const TextFormatFlags Flags = TextFormatFlags.NoPadding | TextFormatFlags.SingleLine | TextFormatFlags.NoPrefix
+                                        | TextFormatFlags.VerticalCenter | TextFormatFlags.Left | TextFormatFlags.NoClipping;
 
     public FieldBox()
     {
-        Controls.Add(Box);
-        Box.GotFocus += (_, _) => Invalidate();
-        Box.LostFocus += (_, _) => Invalidate();
-        Box.MouseEnter += (_, _) => { Hover = true; Invalidate(); };
-        Box.MouseLeave += (_, _) => { Hover = false; Invalidate(); };
-        TabStop = false;
+        TabStop = true;
+        Cursor = Cursors.IBeam;
+        _blink.Tick += (_, _) => { _caretOn = !_caretOn; Invalidate(); };
     }
 
-    [AllowNull]
-    public override string Text { get => Box.Text; set => Box.Text = value; }
-
-    protected override void OnClick(EventArgs e) { Box.Focus(); base.OnClick(e); }
-
-    protected override void OnLayout(LayoutEventArgs e)
+    protected override void Dispose(bool disposing)
     {
-        base.OnLayout(e);
-        float s = S;
-        Box.Font = Fonts.Get(Theme.TextFont, 13 * s);
-        Box.BackColor = T.Control;
-        Box.ForeColor = T.Text;
-        int sufW = string.IsNullOrEmpty(Suffix) ? 0 : TextRenderer.MeasureText(Suffix, Fonts.Get(Theme.TextFont, 13 * s)).Width;
-        int pad = (int)(10 * s);
-        Box.SetBounds(pad, (Height - Box.PreferredHeight) / 2, Math.Max(10, Width - pad * 2 - sufW), Box.PreferredHeight);
+        if (disposing) _blink.Dispose();
+        base.Dispose(disposing);
     }
 
+    private Font F => Fonts.Get(Theme.TextFont, 13 * S);
+    private int Pad => (int)(10 * S);
+    private int SuffixW => string.IsNullOrEmpty(Suffix) ? 0 : TextRenderer.MeasureText(Suffix, F, Size.Empty, Flags).Width + (int)(6 * S);
+    private int ViewW => Math.Max(10, Width - Pad * 2 - SuffixW);
+    private int SelStart => Math.Min(_caret, _anchor);
+    private int SelLen => Math.Abs(_caret - _anchor);
+
+    private int X(int index)
+    {
+        if (index <= 0) return 0;
+        return TextRenderer.MeasureText(Text[..Math.Min(index, Text.Length)], F, Size.Empty, Flags).Width;
+    }
+
+    private int IndexAt(int px)
+    {
+        int x = px - Pad + _scroll, best = 0, bestD = int.MaxValue;
+        for (int i = 0; i <= Text.Length; i++)
+        {
+            int d = Math.Abs(X(i) - x);
+            if (d < bestD) { bestD = d; best = i; }
+        }
+        return best;
+    }
+
+    private void KeepCaretVisible()
+    {
+        int cx = X(_caret);
+        if (cx - _scroll > ViewW) _scroll = cx - ViewW;
+        if (cx - _scroll < 0) _scroll = cx;
+        _scroll = Math.Max(0, Math.Min(_scroll, Math.Max(0, X(Text.Length) - ViewW)));
+    }
+
+    private void MoveCaret(int pos, bool extend)
+    {
+        _caret = Math.Clamp(pos, 0, Text.Length);
+        if (!extend) _anchor = _caret;
+        RestartBlink();
+        KeepCaretVisible();
+        Invalidate();
+    }
+
+    public void SelectAll() { _anchor = 0; _caret = Text.Length; KeepCaretVisible(); Invalidate(); }
+
+    private void Replace(string ins)
+    {
+        ins = new string(ins.Where(c => !char.IsControl(c)).ToArray());
+        int start = SelStart;
+        string t = Text.Remove(start, SelLen);
+        if (t.Length + ins.Length > MaxLength) ins = ins[..Math.Max(0, MaxLength - t.Length)];
+        _caret = _anchor = start + ins.Length;
+        Text = t.Insert(start, ins);   // raises TextChanged
+        KeepCaretVisible();
+        RestartBlink();
+        Invalidate();
+    }
+
+    private void RestartBlink()
+    {
+        _caretOn = true;
+        if (Focused) { _blink.Stop(); _blink.Start(); }
+    }
+
+    protected override void OnTextChanged(EventArgs e)
+    {
+        _caret = Math.Min(_caret, Text.Length);
+        _anchor = Math.Min(_anchor, Text.Length);
+        Invalidate();
+        base.OnTextChanged(e);
+    }
+
+    // ---- focus ----
+    protected override void OnGotFocus(EventArgs e)
+    {
+        base.OnGotFocus(e);
+        if (!_mouseFocus) SelectAll(); // tabbing in selects everything, like a normal text box
+        _mouseFocus = false;
+        RestartBlink();
+    }
+
+    protected override void OnLostFocus(EventArgs e)
+    {
+        base.OnLostFocus(e);
+        _blink.Stop();
+        _anchor = _caret;
+        Invalidate();
+    }
+
+    // ---- mouse ----
+    protected override void OnMouseDown(MouseEventArgs e)
+    {
+        base.OnMouseDown(e);
+        if (e.Button != MouseButtons.Left) return;
+        if (!Focused) { _mouseFocus = true; Focus(); }
+        MoveCaret(IndexAt(e.X), (ModifierKeys & Keys.Shift) != 0);
+        _dragging = true; Capture = true;
+    }
+
+    protected override void OnMouseMove(MouseEventArgs e)
+    {
+        base.OnMouseMove(e);
+        if (_dragging) MoveCaret(IndexAt(e.X), extend: true);
+    }
+
+    protected override void OnMouseUp(MouseEventArgs e)
+    {
+        base.OnMouseUp(e);
+        _dragging = false; Capture = false;
+    }
+
+    protected override void OnDoubleClick(EventArgs e) { base.OnDoubleClick(e); SelectAll(); }
+
+    // ---- keyboard ----
+    protected override bool IsInputKey(Keys k) =>
+        (k & Keys.KeyCode) is Keys.Left or Keys.Right or Keys.Home or Keys.End or Keys.Back or Keys.Delete || base.IsInputKey(k);
+
+    protected override void OnKeyDown(KeyEventArgs e)
+    {
+        bool shift = e.Shift;
+        switch (e.KeyCode)
+        {
+            case Keys.Left:
+                MoveCaret(SelLen > 0 && !shift ? SelStart : _caret - 1, shift); break;
+            case Keys.Right:
+                MoveCaret(SelLen > 0 && !shift ? SelStart + SelLen : _caret + 1, shift); break;
+            case Keys.Home: MoveCaret(0, shift); break;
+            case Keys.End: MoveCaret(Text.Length, shift); break;
+            case Keys.Back:
+                if (SelLen == 0 && _caret > 0) _anchor = _caret - 1;
+                if (SelLen > 0) Replace("");
+                break;
+            case Keys.Delete:
+                if (SelLen == 0 && _caret < Text.Length) _anchor = _caret + 1;
+                if (SelLen > 0) Replace("");
+                break;
+            case Keys.A when e.Control: SelectAll(); break;
+            case Keys.C when e.Control:
+                if (SelLen > 0) try { Clipboard.SetText(Text.Substring(SelStart, SelLen)); } catch { }
+                break;
+            case Keys.X when e.Control:
+                if (SelLen > 0) { try { Clipboard.SetText(Text.Substring(SelStart, SelLen)); } catch { } Replace(""); }
+                break;
+            case Keys.V when e.Control:
+                try { if (Clipboard.ContainsText()) Replace(Clipboard.GetText().Split('\n')[0]); } catch { }
+                break;
+            default:
+                base.OnKeyDown(e);
+                return;
+        }
+        e.Handled = e.SuppressKeyPress = true;
+    }
+
+    protected override void OnKeyPress(KeyPressEventArgs e)
+    {
+        if (!char.IsControl(e.KeyChar)) { Replace(e.KeyChar.ToString()); e.Handled = true; }
+        base.OnKeyPress(e);
+    }
+
+    // ---- paint ----
     protected override void OnPaint(PaintEventArgs e)
     {
         var g = Prep(e);
         float s = S, rad = 4 * s;
         var r = new RectangleF(0.5f, 0.5f, Width - 1.5f, Height - 1.5f);
-        Theme.FillRound(g, T.Control, r, rad);
+        Theme.FillRound(g, Focused ? T.Card : Hover ? T.ControlHover : T.Control, r, rad);
         Theme.StrokeRound(g, T.ControlBorder, r, rad, 1f);
-        if (Box.Focused)
+        if (Focused)
         {
             using var pen = new Pen(T.Accent, 2 * s);
-            g.SmoothingMode = SmoothingMode.None;
+            var sm = g.SmoothingMode; g.SmoothingMode = SmoothingMode.None;
             g.DrawLine(pen, rad, Height - 1.5f * s, Width - rad, Height - 1.5f * s);
+            g.SmoothingMode = sm;
         }
+
+        var font = F;
+        var view = new Rectangle(Pad, 0, ViewW, Height);
+        var oldClip = g.Clip;
+        g.SetClip(view);
+        int x0 = Pad - _scroll;
+        TextRenderer.DrawText(g, Text, font, new Rectangle(x0, 0, X(Text.Length) + 4, Height), T.Text, Flags);
+
+        if (Focused && SelLen > 0)
+        {
+            int sx = x0 + X(SelStart), ex = x0 + X(SelStart + SelLen);
+            float h = font.GetHeight(g) + 2 * s;
+            var sel = new RectangleF(sx, (Height - h) / 2, Math.Max(1, ex - sx), h);
+            Theme.FillRound(g, T.Accent, sel, 2 * s);
+            TextRenderer.DrawText(g, Text.Substring(SelStart, SelLen), font, new Rectangle(sx, 0, ex - sx + 4, Height), T.OnAccent, Flags);
+        }
+        else if (Focused && _caretOn)
+        {
+            int cx = x0 + X(_caret);
+            float h = font.GetHeight(g);
+            using var p = new Pen(T.Text, Math.Max(1f, 1f * s));
+            g.DrawLine(p, cx, (Height - h) / 2, cx, (Height + h) / 2);
+        }
+        g.Clip = oldClip;
+
         if (!string.IsNullOrEmpty(Suffix))
-            TextRenderer.DrawText(g, Suffix, Fonts.Get(Theme.TextFont, 13 * s),
-                new Rectangle(0, 0, Width - (int)(10 * s), Height), T.TextDim, TextFormatFlags.Right | TextFormatFlags.VerticalCenter);
+            TextRenderer.DrawText(g, Suffix, font, new Rectangle(0, 0, Width - Pad, Height), T.TextDim, TextFormatFlags.Right | TextFormatFlags.VerticalCenter | TextFormatFlags.SingleLine);
     }
 }
 
